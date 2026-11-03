@@ -284,7 +284,8 @@ failures increment one report instead of creating unbounded duplicates.
   paths are checked for project containment and symlink traversal.
 - The localhost bridge exposes read-only summaries at
   \`GET /bridge/bugs?limit=50\`. Reports are newest-first and the limit is capped
-  at 100.
+  at 100. The HTTP response includes exception summaries, file/function/line
+  locations and AST symbols, but omits source excerpts and source-line text.
 
 ### Current limits
 

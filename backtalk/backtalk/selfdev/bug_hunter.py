@@ -108,6 +108,8 @@ def _parse_frames(text: str) -> list[tuple[str, int, str]]:
 def _resolve_project_file(project_root: Path, filename: str) -> tuple[Path, str] | None:
     try:
         raw = Path(filename)
+        if ".." in raw.parts:
+            return None
         if not raw.is_absolute():
             raw = project_root / raw
         lexical_path = Path(os.path.abspath(str(raw)))

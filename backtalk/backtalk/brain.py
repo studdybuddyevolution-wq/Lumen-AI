@@ -17,6 +17,7 @@ from pathlib import Path
 
 from backtalk.config import CFG, DISCIPLINE
 from backtalk.registry import DEFAULT_REGISTRY, ToolValidationError
+from backtalk.features import core_tools as _core_tools  # registers trusted built-ins
 from backtalk.router import ToolRouter
 from backtalk.vlog import log
 

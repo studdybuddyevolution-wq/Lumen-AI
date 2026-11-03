@@ -317,19 +317,6 @@ CONSOLE_VERBS = {
                   "hands free listening", "open mic", "open the mic"),
     "micptt":    ("push to talk", "push to talk mode",
                   "back to push to talk", "back to the button"),
-    "noask":     ("stop asking for permission",
-                  "stop asking permission",
-                  "stop asking me for permission",
-                  "turn off the permission prompt",
-                  "turn off the permission prompts",
-                  "turn off the permissions prompt",
-                  "turn off the permissions prompts",
-                  "turn off permissions", "turn off permission checks",
-                  "disable the permission checks",
-                  "disable permission checks", "auto approve",
-                  "auto approve mode"),
-    "ask":       ("start asking again", "ask before acting",
-                  "ask for permission again"),
 }
 _EFFORTS = ("low", "medium", "high", "xhigh", "max")
 
@@ -655,8 +642,6 @@ async def amain():
         except IndexError:
             pass
 
-    CFG_BOOT_MODE = CFG["permission_mode"]
-    _AUTOAPPROVE["on"] = False
     _MIC["mode"] = "open" if (open_mic
                               or CFG.get("mic_mode") == "open") else "ptt"
     # resume_last_session: reattach to the saved conversation, if any
@@ -671,9 +656,7 @@ async def amain():
 
     mouth = Mouth()
     ears = Ears()
-    brain = WarmBrain(model=model,
-                      can_use_tool=make_permission_gate(mouth),
-                      resume_id=resume_id)
+    brain = WarmBrain(model=model, resume_id=resume_id)
 
     mode = ("hands-free listening (the talk key still works)"
             if _MIC["mode"] == "open"
@@ -797,42 +780,6 @@ async def amain():
                 key = str(CFG.get("ptt_key", "home")).replace("_", " ")
                 mouth.say(f"Push to talk. Hold the {key} key and "
                           "talk; the mic stays closed otherwise.")
-        elif verb == "noask":
-            resp = ""
-            _CONFIRM["verb"] = None
-            mouth.say("Approval checks stay on. I will always ask before actions.")
-        elif verb == "noask:confirmed":
-            resp = ""
-            _CONFIRM["verb"] = None
-            mouth.say("I can't disable action approvals. They stay enabled.")
-        elif verb == "ask":
-            resp = ""
-            saved = _write_config_key("permission_mode", "ask")
-            _AUTOAPPROVE["on"] = False
-            flipped = True
-            if CFG_BOOT_MODE == "bypassPermissions":
-                # a bypass-booted session never consults the gate, so
-                # the SDK itself must flip (the safe direction is
-                # allowed live). If that fails, saying "done" would be
-                # a lie: the agent would keep acting silently.
-                try:
-                    await brain.set_permission_mode("ask")
-                except Exception as e:
-                    flipped = False
-                    log(f"[console] live flip to ask FAILED: {e}")
-            log("[console] permission_mode -> ask"
-                + (" (saved)" if saved else " (session only)"))
-            if flipped:
-                mouth.say("Done. I'll ask out loud before real "
-                          "actions"
-                          + (", and that's saved as your default."
-                             if saved else
-                             ". The config file couldn't be written, "
-                             "so tell me again after a restart."))
-            else:
-                mouth.say("I saved asking as your default, but this "
-                          "session couldn't switch over. Restart the "
-                          "voice line to get asking back.")
         else:
             resp = ""
         if say_after:

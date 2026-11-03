@@ -34,10 +34,10 @@ _SECRET_ASSIGNMENT_RE = re.compile(
 )
 _BEARER_RE = re.compile(r"(?i)\bBearer\s+[A-Za-z0-9._~+/-]+=*")
 _PRIVATE_KEY_BLOCK_RE = re.compile(
-    r"(?is)-----BEGIN [A-Z ]*PRIVATE KEY-----.*?-----END [A-Z ]*PRIVATE KEY-----"
+    r"(?is)-----BEGIN [A-Z ]*PRIVATE KEY-----.*?(?:-----END [A-Z ]*PRIVATE KEY-----|$)"
 )
 _WINDOWS_USER_PATH_RE = re.compile(r"(?i)[A-Z]:\\Users\\[^\\\s]+")
-_POSIX_HOME_PATH_RE = re.compile(r"(?<![A-Za-z0-9])/(?:home|Users)/[^/\\s]+")
+_POSIX_HOME_PATH_RE = re.compile(r"(?<![A-Za-z0-9])/(?:home|Users)/[^\s/]+")
 _LONG_TOKEN_RE = re.compile(r"\b(?:sk-[A-Za-z0-9_-]{12,}|gh[pousr]_[A-Za-z0-9]{20,})\b")
 _HEX_ADDRESS_RE = re.compile(r"\b0x[0-9a-fA-F]{8,}\b")
 _UUID_RE = re.compile(

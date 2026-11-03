@@ -9,7 +9,6 @@ from __future__ import annotations
 import contextvars
 import copy
 import hashlib
-import importlib.machinery
 import importlib.util
 import logging
 import re
@@ -212,21 +211,7 @@ class ToolRegistry:
             return False
         return stored == digest
 
-    def _ensure_feature_package(self, feature_dir: Path) -> str:
-        package_name = "_lumen_feature_plugins_" + str(
-            abs(hash(str(feature_dir.resolve())))
-        )
-        if package_name not in sys.modules:
-            package = types.ModuleType(package_name)
-            package.__path__ = [str(feature_dir)]  # type: ignore[attr-defined]
-            package.__package__ = package_name
-            package.__spec__ = importlib.machinery.ModuleSpec(
-                package_name, loader=None, is_package=True
-            )
-            sys.modules[package_name] = package
-        return package_name
-
-    def _load_feature(self, path: Path, package_name: str) -> bool:
+    def _load_feature(self, path: Path) -> bool:
         source = str(path.resolve())
         previous = {
             name: definition
@@ -235,7 +220,7 @@ class ToolRegistry:
         }
         self.unregister_source(source)
         self._generation += 1
-        module_name = f"{package_name}.{path.stem}_{self._generation}"
+        module_name = f"_lumen_feature_plugin_{path.stem}_{self._generation}"
         token = _ACTIVE_REGISTRY.set(self)
         module: types.ModuleType | None = None
         try:
@@ -243,7 +228,6 @@ class ToolRegistry:
             if spec is None or spec.loader is None:
                 raise ImportError(f"Could not create import spec for {path.name}")
             module = importlib.util.module_from_spec(spec)
-            module.__package__ = package_name
             sys.modules[module_name] = module
             spec.loader.exec_module(module)
             for old_name, old_module in list(self._modules.items()):
@@ -273,7 +257,6 @@ class ToolRegistry:
         folder = Path(feature_dir).resolve()
         folder.mkdir(parents=True, exist_ok=True)
         (folder / "__init__.py").touch(exist_ok=True)
-        package_name = self._ensure_feature_package(folder)
         results: dict[str, str] = {}
         current: dict[str, tuple[int, int, str]] = {}
 
@@ -308,7 +291,7 @@ class ToolRegistry:
                     current[path.name] = old_signature
                 continue
 
-            if self._load_feature(path, package_name):
+            if self._load_feature(path):
                 current[path.name] = signature
                 results[path.name] = "loaded"
             else:

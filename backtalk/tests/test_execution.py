@@ -95,7 +95,7 @@ class ToolExecutionIntegrationTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_success_records_completed_call(self) -> None:
         result = await self.brain._run_tool({
-            "function": {"name": "sample_tool", "arguments": {"value": 7}}
+            "function": {"name": "sample_tool", "arguments": "{\\"value\\": 7}"}
         })
         event = self.brain.execution_tracker.recent(1)[0]
         self.assertEqual(result, "ok")

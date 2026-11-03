@@ -28,7 +28,7 @@ dependencies = [
 ]
 
 [tool.setuptools]
-packages = ["backtalk", "backtalk.features"]
+packages = ["backtalk", "backtalk.features", "backtalk.selfdev"]
 
 [tool.uv]
 package = false

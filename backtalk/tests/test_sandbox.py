@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -8,6 +9,7 @@ from pathlib import Path
 from backtalk.selfdev.sandbox import SandboxError, SandboxRunner
 
 
+@unittest.skipIf(os.environ.get('LUMEN_SANDBOX') == '1', 'avoid recursively launching the sandbox from its own test suite')
 class SandboxRunnerTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temp = tempfile.TemporaryDirectory()

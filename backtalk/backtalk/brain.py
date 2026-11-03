@@ -22,6 +22,18 @@ from backtalk.vlog import log
 _SENTENCE_END = re.compile(r"(?<=[.!?])\s+")
 
 
+class PermissionResultAllow:
+    """Legacy import compatibility; the registry no longer uses action prompts."""
+    behavior = "allow"
+
+
+class PermissionResultDeny:
+    """Legacy import compatibility; the registry no longer uses action prompts."""
+    behavior = "deny"
+    message = "The user denied this action."
+    interrupt = False
+
+
 class WarmBrain:
     """Long-lived chat history backed by a local Ollama model."""
 

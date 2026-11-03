@@ -107,9 +107,9 @@ class BugHunterTests(unittest.TestCase):
         self.assertEqual(summary["recurrent_reports"], 1)
 
     def test_report_history_is_bounded(self) -> None:
-        for index in range(5):
+        for label in ("alpha", "bravo", "charlie", "delta", "echo"):
             self.hunter.capture_traceback(
-                self.make_traceback(message=f"failure-kind-{index}")
+                self.make_traceback(message=f"failure-kind-{label}")
             )
 
         self.assertEqual(len(self.hunter.recent(10)), 3)

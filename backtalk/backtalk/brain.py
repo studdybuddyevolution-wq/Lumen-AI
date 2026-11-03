@@ -8,6 +8,7 @@ from __future__ import annotations
 import asyncio
 import json
 import re
+from dataclasses import dataclass
 from typing import Any
 
 import httpx
@@ -22,16 +23,18 @@ from backtalk.vlog import log
 _SENTENCE_END = re.compile(r"(?<=[.!?])\s+")
 
 
+@dataclass
 class PermissionResultAllow:
     """Legacy import compatibility; the registry no longer uses action prompts."""
-    behavior = "allow"
+    behavior: str = "allow"
 
 
+@dataclass
 class PermissionResultDeny:
     """Legacy import compatibility; the registry no longer uses action prompts."""
-    behavior = "deny"
-    message = "The user denied this action."
-    interrupt = False
+    behavior: str = "deny"
+    message: str = "The user denied this action."
+    interrupt: bool = False
 
 
 class WarmBrain:

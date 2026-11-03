@@ -32,7 +32,10 @@ _SECRET_ASSIGNMENT_RE = re.compile(
     """
 )
 _BEARER_RE = re.compile(r"(?i)\bBearer\s+[A-Za-z0-9._~+/-]+=*")
-_PRIVATE_KEY_RE = re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----")
+_PRIVATE_KEY_BLOCK_RE = re.compile(
+    r"(?is)-----BEGIN [A-Z ]*PRIVATE KEY-----.*?-----END [A-Z ]*PRIVATE KEY-----"
+)
+_WINDOWS_USER_PATH_RE = re.compile(r"(?i)[A-Z]:\\Users\\[^\\\s]+")
 _LONG_TOKEN_RE = re.compile(r"\b(?:sk-[A-Za-z0-9_-]{12,}|gh[pousr]_[A-Za-z0-9]{20,})\b")
 _HEX_ADDRESS_RE = re.compile(r"\b0x[0-9a-fA-F]{8,}\b")
 _UUID_RE = re.compile(
@@ -53,8 +56,9 @@ def _now() -> str:
 def redact_text(value: str, *, limit: int = _MAX_MESSAGE_CHARS) -> str:
     """Remove common inline credentials and bound untrusted diagnostic text."""
     text = str(value or "")
-    if _PRIVATE_KEY_RE.search(text):
-        text = _PRIVATE_KEY_RE.sub("[private-key-redacted]", text)
+    if _PRIVATE_KEY_BLOCK_RE.search(text):
+        text = _PRIVATE_KEY_BLOCK_RE.sub("[private-key-redacted]", text)
+    text = _WINDOWS_USER_PATH_RE.sub("%USERPROFILE%", text)
     text = _SECRET_ASSIGNMENT_RE.sub(lambda match: match.group(0).split("=")[0].split(":")[0] + "=[redacted]", text)
     text = _BEARER_RE.sub("Bearer [redacted]", text)
     text = _LONG_TOKEN_RE.sub("[token-redacted]", text)
@@ -198,10 +202,15 @@ class BugHunter:
         try:
             source = path.read_text(encoding="utf-8", errors="replace")
             lines = source.splitlines()
+        except (OSError, UnicodeError, ValueError, MemoryError):
+            return relative, "", ()
+
+        try:
             tree = ast.parse(source, filename=relative)
             symbol = _find_ast_symbol(tree, lineno) or ""
-        except (OSError, UnicodeError, SyntaxError, ValueError, RecursionError, MemoryError):
-            lines = []
+        except (SyntaxError, ValueError, RecursionError, MemoryError):
+            # Syntax errors are useful Bug Hunter inputs too. Preserve the
+            # bounded line excerpt even when the file cannot form an AST.
             symbol = ""
 
         if not lines:

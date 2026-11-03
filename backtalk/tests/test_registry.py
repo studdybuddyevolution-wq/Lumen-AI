@@ -10,6 +10,8 @@ from backtalk.registry import (
     ToolRegistry,
     ToolRegistrationError,
     ToolValidationError,
+    approve_feature_module,
+    record_feature_verification,
     tool,
 )
 
@@ -89,11 +91,59 @@ class ToolRegistryTests(unittest.TestCase):
         with self.assertRaisesRegex(ToolValidationError, "text"):
             self.registry.execute("needs_text", {"text": 123})
 
-    def _approve(self, feature: Path) -> None:
-        feature.with_suffix(".approved").write_text(
-            hashlib.sha256(feature.read_bytes()).hexdigest(),
-            encoding="ascii",
-        )
+    def _verify_and_approve(self, feature: Path) -> None:
+        digest = hashlib.sha256(feature.read_bytes()).hexdigest()
+        receipt = {
+            "receipt_id": "unit-test-receipt",
+            "passed": True,
+            "subject_sha256": digest,
+            "source_sha256": "test-workspace-digest",
+            "snapshot_sha256": "test-snapshot-digest",
+            "checks": [{"name": "unittest", "passed": True}],
+            "finished_at": "2026-11-03T00:00:00+00:00",
+            "isolation": "test-fixture",
+            "security_boundary": False,
+        }
+        record_feature_verification(feature, receipt)
+        approve_feature_module(feature)
+
+    def test_approval_is_refused_without_a_passing_matching_receipt(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            feature = Path(temp) / "sample.py"
+            feature.write_text("VALUE = 1\n", encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "sandbox verification"):
+                approve_feature_module(feature)
+
+            digest = hashlib.sha256(feature.read_bytes()).hexdigest()
+            failed = {"receipt_id": "failed", "passed": False, "subject_sha256": digest}
+            with self.assertRaisesRegex(ValueError, "passing sandbox receipt"):
+                record_feature_verification(feature, failed)
+
+            passed = {
+                "receipt_id": "passed",
+                "passed": True,
+                "subject_sha256": "wrong-digest",
+            }
+            with self.assertRaisesRegex(ValueError, "does not match"):
+                record_feature_verification(feature, passed)
+
+    def test_approved_feature_without_verified_receipt_is_not_loaded(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            feature_dir = Path(temp) / "features"
+            feature_dir.mkdir()
+            feature = feature_dir / "unverified_feature.py"
+            feature.write_text(
+                "from backtalk.registry import tool\n"
+                "@tool('unverified_tool', 'Must not load', "
+                "{'type': 'object', 'properties': {}}, False)\n"
+                "def run():\n    return 'unsafe'\n",
+                encoding="utf-8",
+            )
+            digest = hashlib.sha256(feature.read_bytes()).hexdigest()
+            feature.with_suffix(".approved").write_text(digest, encoding="ascii")
+            result = self.registry.load_features(feature_dir)
+            self.assertIn("sandbox verification", result[feature.name])
+            self.assertIsNone(self.registry.get("unverified_tool"))
 
     def test_feature_reload_replaces_handler_and_deleted_file_unregisters(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
@@ -114,7 +164,7 @@ class ToolRegistryTests(unittest.TestCase):
                 "def run():\n    return 'first'\n",
                 encoding="utf-8",
             )
-            self._approve(feature)
+            self._verify_and_approve(feature)
             self.registry.load_features(feature_dir)
             self.assertEqual(self.registry.execute("reload_test", {}), "first")
 
@@ -128,7 +178,7 @@ class ToolRegistryTests(unittest.TestCase):
             self.registry.load_features(feature_dir)
             self.assertEqual(self.registry.execute("reload_test", {}), "first")
 
-            self._approve(feature)
+            self._verify_and_approve(feature)
             self.registry.load_features(feature_dir)
             self.assertEqual(
                 self.registry.execute("reload_test", {}),
@@ -141,7 +191,7 @@ class ToolRegistryTests(unittest.TestCase):
             self.assertIsNone(self.registry.get("reload_test"))
 
             # Re-approve, load again, then verify deleting an active feature unregisters it.
-            self._approve(feature)
+            self._verify_and_approve(feature)
             self.registry.load_features(feature_dir)
             self.assertEqual(self.registry.execute("reload_test", {}), "second version")
             feature.unlink()

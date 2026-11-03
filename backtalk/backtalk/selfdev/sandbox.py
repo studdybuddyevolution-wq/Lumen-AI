@@ -16,6 +16,7 @@ import signal
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import uuid
 from dataclasses import asdict, dataclass
@@ -199,6 +200,25 @@ def _terminate_process(process: subprocess.Popen) -> None:
             pass
 
 
+def _capture_stream(stream) -> str:
+    """Drain a child pipe while retaining only a bounded output prefix."""
+    captured = bytearray()
+    truncated = False
+    while True:
+        chunk = stream.read(8192)
+        if not chunk:
+            break
+        available = _MAX_OUTPUT_CHARS - len(captured)
+        if available > 0:
+            captured.extend(chunk[:available])
+        if len(chunk) > available:
+            truncated = True
+    text = captured.decode("utf-8", errors="replace")
+    if truncated:
+        text += "\n[output truncated]"
+    return text
+
+
 def _run_check(
     check: str,
     workspace: Path,
@@ -210,6 +230,8 @@ def _run_check(
     env = _safe_environment(temp_root)
     started = time.perf_counter()
     timed_out = False
+    stdout = ""
+    stderr = ""
     try:
         process = subprocess.Popen(
             command,
@@ -217,18 +239,39 @@ def _run_check(
             env=env,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
             creationflags=subprocess.CREATE_NEW_PROCESS_GROUP if os.name == "nt" else 0,
             start_new_session=os.name != "nt",
         )
+        output: dict[str, str] = {}
+        readers = [
+            threading.Thread(
+                target=lambda: output.setdefault("stdout", _capture_stream(process.stdout)),
+                name="lumen-sandbox-stdout",
+                daemon=True,
+            ),
+            threading.Thread(
+                target=lambda: output.setdefault("stderr", _capture_stream(process.stderr)),
+                name="lumen-sandbox-stderr",
+                daemon=True,
+            ),
+        ]
+        for reader in readers:
+            reader.start()
         try:
-            stdout, stderr = process.communicate(timeout=timeout_seconds)
+            process.wait(timeout=timeout_seconds)
         except subprocess.TimeoutExpired:
             timed_out = True
             _terminate_process(process)
-            stdout, stderr = process.communicate(timeout=5)
+            try:
+                process.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                process.kill()
+                process.wait(timeout=5)
+        for reader in readers:
+            reader.join(timeout=3)
+        stdout = output.get("stdout", "")
+        stderr = output.get("stderr", "")
+        if timed_out:
             stderr = (stderr + "\nSandbox check timed out.").strip()
         exit_code = process.returncode if process.returncode is not None else -1
     except OSError as exc:
@@ -244,7 +287,6 @@ def _run_check(
         stdout=stdout[-_MAX_OUTPUT_CHARS:],
         stderr=stderr[-_MAX_OUTPUT_CHARS:],
     )
-
 
 class SandboxRunner:
     """Run fixed Python verification checks against a disposable source snapshot."""

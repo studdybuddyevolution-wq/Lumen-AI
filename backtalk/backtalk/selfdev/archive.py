@@ -71,6 +71,8 @@ def _normalise_metrics(metrics: Mapping[str, Any] | None) -> dict[str, float] | 
         return None
     if not isinstance(metrics, Mapping):
         raise ArchiveError("benchmark_metrics must be a mapping of metric names to numbers.")
+    if len(metrics) > 100:
+        raise ArchiveError("benchmark_metrics may contain at most 100 metric dimensions.")
 
     result: dict[str, float] = {}
     for name, value in metrics.items():
@@ -313,7 +315,15 @@ class CandidateArchive:
                     payload["regression_checks"] = tuple(
                         CheckSummary(**item) for item in payload.get("regression_checks", ())
                     )
-                records.append(record_type(**payload))
+                record = record_type(**payload)
+                id_field = {
+                    CandidateRecord: "candidate_id",
+                    CandidateEvaluation: "evaluation_id",
+                    CandidateDecision: "decision_id",
+                }[record_type]
+                if getattr(record, id_field) != path.stem:
+                    raise ValueError("record ID does not match its immutable file name")
+                records.append(record)
             except (OSError, UnicodeError, json.JSONDecodeError, TypeError, ValueError, KeyError) as exc:
                 raise ArchiveError(f"Could not read archive record {path.name}: {exc}") from exc
         return records
@@ -411,7 +421,10 @@ class CandidateArchive:
                 raise ArchiveError("Candidate record exceeds the archive size limit.")
             payload = json.loads(path.read_text(encoding="utf-8"))
             payload["changed_files"] = tuple(payload.get("changed_files", ()))
-            return CandidateRecord(**payload)
+            candidate = CandidateRecord(**payload)
+            if candidate.candidate_id != path.stem:
+                raise ValueError("candidate ID does not match its immutable file name")
+            return candidate
         except (OSError, UnicodeError, json.JSONDecodeError, TypeError, ValueError, KeyError) as exc:
             if isinstance(exc, ArchiveError):
                 raise

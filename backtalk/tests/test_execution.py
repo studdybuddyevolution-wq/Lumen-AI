@@ -89,6 +89,11 @@ class _StubRegistry:
         return self.result
 
 
+class _BrokenBugHunter:
+    def capture_exception(self, exc, *, component="runtime"):
+        raise OSError("diagnostic storage is unavailable")
+
+
 class ToolExecutionIntegrationTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self) -> None:
         self.brain = WarmBrain.__new__(WarmBrain)
@@ -124,6 +129,17 @@ class ToolExecutionIntegrationTests(unittest.IsolatedAsyncioTestCase):
         event = self.brain.execution_tracker.recent(1)[0]
         self.assertIn("Tool rejected", result)
         self.assertEqual(event["status"], "denied")
+
+    async def test_bug_hunter_failure_does_not_change_tool_result(self) -> None:
+        self.brain._registry = _StubRegistry(error=RuntimeError("simulated failure"))
+        self.brain.bug_hunter = _BrokenBugHunter()
+
+        result = await self.brain._run_tool({
+            "function": {"name": "sample_tool", "arguments": {}}
+        })
+
+        self.assertIn("RuntimeError: simulated failure", result)
+        self.assertEqual(self.brain.execution_tracker.recent(1)[0]["status"], "failed")
 
     async def test_handler_exception_is_recorded_as_failed(self) -> None:
         self.brain._registry = _StubRegistry(error=RuntimeError("simulated failure"))

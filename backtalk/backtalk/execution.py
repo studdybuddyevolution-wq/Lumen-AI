@@ -61,7 +61,7 @@ class ExecutionTracker:
         event = {
             "id": execution_id,
             "name": str(name or "unknown")[:128],
-            "arguments": self._snapshot(arguments),
+            "args": self._snapshot(arguments),
             "result": None,
             "latency_ms": None,
             "status": "running",

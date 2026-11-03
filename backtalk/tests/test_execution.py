@@ -15,7 +15,7 @@ class ExecutionTrackerTests(unittest.TestCase):
         running = tracker.recent(1)[0]
         self.assertEqual(running["id"], execution_id)
         self.assertEqual(running["status"], "running")
-        self.assertEqual(running["arguments"]["path"], "C:/Lumen/note.md")
+        self.assertEqual(running["args"]["path"], "C:/Lumen/note.md")
         self.assertEqual(running["provider"], "local")
 
         finished = tracker.finish(execution_id, "completed", "File saved.")
@@ -51,7 +51,7 @@ class ExecutionTrackerTests(unittest.TestCase):
         tracker = ExecutionTracker(max_payload_chars=256)
         execution_id = tracker.start("large_tool", {"text": "x" * 1000})
         event = tracker.recent(1)[0]
-        self.assertTrue(event["arguments"]["_truncated"])
+        self.assertTrue(event["args"]["_truncated"])
 
         with self.assertRaisesRegex(ValueError, "status must be one of"):
             tracker.finish(execution_id, "pending", "not terminal")

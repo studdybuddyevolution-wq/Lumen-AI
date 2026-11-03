@@ -1,4 +1,4 @@
-"""Local desktop tools for Lumen. Mutating tools are permission-gated in brain.py."""
+"""Local desktop tools for Lumen with workspace and command safety checks."""
 from __future__ import annotations
 
 import os
@@ -316,6 +316,8 @@ def _open_path_permission(args: dict[str, Any]):
     return "OpenPath", {"path": str(args.get("path") or "")}, _permission_context("open a file or folder", "open an existing path inside a configured Lumen workspace")
 
 
+# Deprecated compatibility metadata. The Phase 1 registry does not consult
+# approval flags; execution policy is enforced by the tool implementations.
 TOOL_META = {
     "list_directory": {"approval": False},
     "read_file": {"approval": False},

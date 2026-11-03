@@ -1,0 +1,262 @@
+"""Lumen Localhost Communication Bridge.
+
+Runs an asyncio HTTP server on localhost:8796 inside the Backtalk voice process.
+Allows the Lumen Dashboard to communicate with the single shared WarmBrain instance,
+access conversation history, submit typed messages, and respond to approval prompts.
+"""
+from __future__ import annotations
+
+import asyncio
+import json
+import time
+from typing import Any, Callable, Coroutine
+from urllib.parse import urlparse, parse_qs
+
+from backtalk.config import CFG
+from backtalk.vlog import log
+
+BRIDGE_HOST = "127.0.0.1"
+BRIDGE_PORT = 8796
+
+# Module-level references supplied by main.py
+_brain: Any = None
+_mouth: Any = None
+_perm_dict: dict[str, Any] | None = None
+_server: asyncio.Server | None = None
+_chat_handler: Callable[[str], Coroutine[Any, Any, str]] | None = None
+_interrupt_handler: Callable[[], Coroutine[Any, Any, None]] | None = None
+
+
+def setup_bridge(
+    brain: Any,
+    mouth: Any,
+    perm_dict: dict[str, Any],
+    chat_handler: Callable[[str], Coroutine[Any, Any, str]],
+    interrupt_handler: Callable[[], Coroutine[Any, Any, None]],
+):
+    """Register runtime objects with the bridge."""
+    global _brain, _mouth, _perm_dict, _chat_handler, _interrupt_handler
+    _brain = brain
+    _mouth = mouth
+    _perm_dict = perm_dict
+    _chat_handler = chat_handler
+    _interrupt_handler = interrupt_handler
+
+
+async def _handle_client(reader: asyncio.StreamReader, writer: asyncio.StreamWriter):
+    """Handle one incoming HTTP connection."""
+    try:
+        line = await reader.readline()
+        if not line:
+            writer.close()
+            return
+        req_line = line.decode("utf-8", errors="replace").strip()
+        parts = req_line.split()
+        if len(parts) < 2:
+            writer.close()
+            return
+        method, path = parts[0], parts[1]
+
+        # Read headers
+        headers: dict[str, str] = {}
+        while True:
+            hline = await reader.readline()
+            if not hline or hline in (b"\r\n", b"\n"):
+                break
+            hstr = hline.decode("utf-8", errors="replace").strip()
+            if ":" in hstr:
+                k, v = hstr.split(":", 1)
+                headers[k.strip().lower()] = v.strip()
+
+        # Read body if present
+        content_len = int(headers.get("content-length", 0))
+        body = b""
+        if content_len > 0:
+            body = await reader.readexactly(content_len)
+
+        parsed_url = urlparse(path)
+        route = parsed_url.path
+
+        # Dispatch routes
+        resp_status = 200
+        resp_data: dict[str, Any] = {}
+
+        if method == "OPTIONS":
+            await _send_response(writer, 204, None)
+            return
+
+        if method == "GET" and route == "/bridge/status":
+            resp_data = _get_status()
+        elif method == "GET" and route == "/bridge/history":
+            resp_data = _get_history()
+        elif method == "GET" and route == "/bridge/approval":
+            resp_data = _get_approval()
+        elif method == "POST" and route == "/bridge/approval":
+            resp_data = _handle_approval(body)
+        elif method == "POST" and route == "/bridge/chat":
+            if _chat_handler is None:
+                resp_status = 503
+                resp_data = {"error": "Chat handler not ready"}
+            else:
+                try:
+                    payload = json.loads(body.decode("utf-8") if body else "{}")
+                    message = str(payload.get("message") or "").strip()
+                    if not message:
+                        resp_status = 400
+                        resp_data = {"error": "Message cannot be empty"}
+                    else:
+                        reply = await _chat_handler(message)
+                        resp_data = {"response": reply}
+                except Exception as exc:
+                    log(f"[bridge] error handling chat: {exc}")
+                    resp_status = 500
+                    resp_data = {"error": str(exc)}
+        elif method == "POST" and route == "/bridge/clear":
+            if _brain is not None:
+                await _brain.command("/clear")
+                resp_data = {"status": "cleared"}
+            else:
+                resp_status = 503
+                resp_data = {"error": "Brain not ready"}
+        elif method == "POST" and route == "/bridge/interrupt":
+            if _interrupt_handler is not None:
+                await _interrupt_handler()
+                resp_data = {"status": "interrupted"}
+            else:
+                resp_data = {"status": "no interrupt handler"}
+        else:
+            resp_status = 404
+            resp_data = {"error": f"Not found: {method} {route}"}
+
+        await _send_response(writer, resp_status, resp_data)
+
+    except (asyncio.CancelledError, ConnectionResetError, BrokenPipeError):
+        pass
+    except Exception as exc:
+        log(f"[bridge] client handler error: {exc}")
+        try:
+            await _send_response(writer, 500, {"error": str(exc)})
+        except Exception:
+            pass
+    finally:
+        try:
+            writer.close()
+            await writer.wait_closed()
+        except Exception:
+            pass
+
+
+async def _send_response(writer: asyncio.StreamWriter, status: int, data: dict[str, Any] | None):
+    """Serialize and write HTTP response with CORS headers."""
+    reason = "OK" if status == 200 else ("No Content" if status == 204 else "Error")
+    body_bytes = json.dumps(data).encode("utf-8") if data is not None else b""
+
+    headers = [
+        f"HTTP/1.1 {status} {reason}",
+        "Content-Type: application/json; charset=utf-8",
+        f"Content-Length: {len(body_bytes)}",
+        "Access-Control-Allow-Origin: *",
+        "Access-Control-Allow-Methods: GET, POST, OPTIONS",
+        "Access-Control-Allow-Headers: Content-Type",
+        "Connection: close",
+        "",
+        "",
+    ]
+    raw = "\r\n".join(headers).encode("utf-8") + body_bytes
+    writer.write(raw)
+    try:
+        await writer.drain()
+    except Exception:
+        pass
+
+
+def _get_status() -> dict[str, Any]:
+    """Return live status of the Backtalk runtime."""
+    speaking = _mouth.speaking if _mouth is not None else False
+    model_name = getattr(_brain, "model", CFG.get("model", "qwen3.5:4b"))
+    turns = _brain.session.get("turns", 0) if _brain is not None else 0
+    pending = _perm_dict.get("pending") if _perm_dict else None
+
+    return {
+        "status": "online",
+        "runtime": "backtalk",
+        "model": model_name,
+        "name": CFG.get("name", "Lumen"),
+        "speaking": speaking,
+        "turns": turns,
+        "pending_approval": bool(pending),
+        "permission_mode": CFG.get("permission_mode", "ask"),
+    }
+
+
+def _get_history() -> dict[str, Any]:
+    """Return conversation history from WarmBrain."""
+    if _brain is None:
+        return {"messages": []}
+
+    formatted = []
+    for msg in getattr(_brain, "_messages", []):
+        role = msg.get("role")
+        if role == "system":
+            continue
+        content = msg.get("content") or ""
+        if not content and msg.get("tool_calls"):
+            # Summarize tool calls
+            calls = msg.get("tool_calls", [])
+            names = [c.get("function", {}).get("name", "tool") for c in calls]
+            content = f"[Tool call: {', '.join(names)}]"
+        if content:
+            formatted.append({
+                "role": role,
+                "content": content,
+            })
+    return {"messages": formatted}
+
+
+def _get_approval() -> dict[str, Any]:
+    """Return pending approval information."""
+    if not _perm_dict:
+        return {"pending": None}
+    return {"pending": _perm_dict.get("pending")}
+
+
+def _handle_approval(body: bytes) -> dict[str, Any]:
+    """Process an approval decision from the dashboard."""
+    if not _perm_dict:
+        return {"status": "error", "message": "No permission system active"}
+
+    try:
+        data = json.loads(body.decode("utf-8") if body else "{}")
+        approved = bool(data.get("approved", False))
+    except Exception:
+        approved = False
+
+    fut = _perm_dict.get("fut")
+    if fut is not None and not fut.done():
+        decision = "yes" if approved else "no"
+        fut.set_result(decision)
+        log(f"[bridge] approval decided via dashboard: {decision}")
+        return {"status": "ok", "decision": "allowed" if approved else "denied"}
+    return {"status": "none_pending", "message": "No approval request was pending"}
+
+
+async def start_bridge_server():
+    """Start the bridge HTTP server."""
+    global _server
+    if _server is not None:
+        return
+    try:
+        _server = await asyncio.start_server(_handle_client, BRIDGE_HOST, BRIDGE_PORT)
+        log(f"[bridge] communication bridge listening on http://{BRIDGE_HOST}:{BRIDGE_PORT}")
+    except OSError as exc:
+        log(f"[bridge] failed to start bridge server on port {BRIDGE_PORT}: {exc}")
+
+
+async def stop_bridge_server():
+    """Stop the bridge server."""
+    global _server
+    if _server is not None:
+        _server.close()
+        await _server.wait_closed()
+        _server = None
+        log("[bridge] communication bridge stopped")

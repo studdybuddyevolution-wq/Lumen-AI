@@ -1,0 +1,54 @@
+﻿# Secrets and credentials
+.env
+.env.*
+!.env.example
+**/api_keys.json
+**/secrets.json
+**/credentials.json
+**/*service-account*.json
+*.pem
+*.key
+id_rsa
+id_ed25519
+
+# Python environments
+.venv/
+venv/
+env/
+ENV/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Node and frontend build output
+node_modules/
+dist/
+.next/
+.turbo/
+
+# Runtime data and logs
+*.log
+logs/
+*.sqlite
+*.sqlite3
+*.db
+
+# Private personal memory
+/ai-memory-vault/
+
+# Temporary backups
+**/.lumen-backup-*/
+*.lumen-backup-*
+*.before-syntax-fix
+
+# Operating system and editor files
+Thumbs.db
+Desktop.ini
+.DS_Store
+
+# Local backup files
+**/*.before-*
+*.bak
+*.backup

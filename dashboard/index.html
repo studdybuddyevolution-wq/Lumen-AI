@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Lumen — Dashboard</title>
+    <link rel="stylesheet" href="styles.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+</head>
+<body>
+
+<aside class="sidebar">
+    <div class="sidebar-brand">
+        <div class="logo">L</div>
+        <h1>LUMEN</h1>
+    </div>
+    <nav class="sidebar-nav">
+        <button class="nav-item active" data-page="home">
+            <span class="icon">◉</span><span>Home</span>
+        </button>
+        <button class="nav-item" data-page="chat">
+            <span class="icon">💬</span><span>Chat</span>
+        </button>
+        <button class="nav-item" data-page="approvals">
+            <span class="icon">🔒</span><span>Approvals</span>
+        </button>
+        <button class="nav-item" data-page="memory">
+            <span class="icon">🧠</span><span>Memory</span>
+        </button>
+        <button class="nav-item" data-page="desktop">
+            <span class="icon">🖥️</span><span>Desktop</span>
+        </button>
+        <button class="nav-item" data-page="gestures">
+            <span class="icon">✋</span><span>Gestures</span>
+        </button>
+    </nav>
+</aside>
+
+<main class="main">
+    <!-- HOME -->
+    <section class="page active" id="page-home">
+        <div class="page-header">
+            <h2>System Status</h2>
+            <p>Lumen component health overview</p>
+        </div>
+        <div class="status-grid" id="status-grid"></div>
+    </section>
+
+    <!-- CHAT -->
+    <section class="page" id="page-chat">
+        <div class="page-header">
+            <h2>Chat with Lumen</h2>
+            <p>Type messages — same brain as the voice interface</p>
+        </div>
+        <div class="chat-container">
+            <div class="chat-messages" id="chat-messages">
+                <div class="empty-state">
+                    <div class="icon">💬</div>
+                    <p>Start a conversation with Lumen</p>
+                </div>
+            </div>
+            <div class="chat-input-area">
+                <textarea id="chat-input" placeholder="Message Lumen..." rows="1"></textarea>
+                <button class="btn btn-primary btn-icon" id="chat-send" title="Send">➤</button>
+                <button class="btn btn-secondary btn-icon" id="chat-clear" title="Clear">✕</button>
+            </div>
+        </div>
+    </section>
+
+    <!-- APPROVALS -->
+    <section class="page" id="page-approvals">
+        <div class="page-header">
+            <h2>Pending Approvals</h2>
+            <p>Review and approve or deny Lumen's requested actions</p>
+        </div>
+        <div id="approvals-container">
+            <div class="empty-state">
+                <div class="icon">🔒</div>
+                <p>No pending approvals. Actions requiring permission will appear here.</p>
+            </div>
+        </div>
+    </section>
+
+    <!-- MEMORY -->
+    <section class="page" id="page-memory">
+        <div class="page-header">
+            <h2>Memory Vault</h2>
+            <p>Search and browse Lumen's memory</p>
+        </div>
+        <div class="memory-search">
+            <input type="text" id="memory-query" placeholder="Search notes...">
+            <button class="btn btn-primary" id="memory-search-btn">Search</button>
+            <button class="btn btn-secondary" id="memory-priorities-btn">Priorities</button>
+            <button class="btn btn-secondary" id="memory-open-obsidian">Open Obsidian</button>
+        </div>
+        <div class="memory-results" id="memory-results"></div>
+    </section>
+
+    <!-- DESKTOP -->
+    <section class="page" id="page-desktop">
+        <div class="page-header">
+            <h2>Desktop Tools</h2>
+            <p>Quick-launch applications and workspace tools</p>
+        </div>
+        <div class="panel">
+            <h3>Applications</h3>
+            <div class="tools-grid" id="app-grid"></div>
+        </div>
+        <div class="panel">
+            <h3>PowerShell</h3>
+            <div style="display:flex;gap:12px">
+                <input type="text" id="ps-command" placeholder="PowerShell command..."
+                    style="flex:1;background:var(--bg-input);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text-primary);font-family:var(--font-mono);font-size:13px;padding:10px 16px;outline:none;">
+                <button class="btn btn-primary" id="ps-run">Run</button>
+            </div>
+            <pre id="ps-output" style="margin-top:12px;background:var(--bg-input);border-radius:var(--radius-sm);padding:12px 16px;font-family:var(--font-mono);font-size:12px;color:var(--text-secondary);max-height:300px;overflow:auto;display:none;"></pre>
+        </div>
+    </section>
+
+    <!-- GESTURES -->
+    <section class="page" id="page-gestures">
+        <div class="page-header">
+            <h2>Gesture Control</h2>
+            <p>Barehands webcam hand-tracking interface</p>
+        </div>
+        <div class="panel">
+            <h3>Barehands Controls</h3>
+            <div style="display:flex;gap:12px;margin-bottom:20px">
+                <button class="btn btn-primary" id="gesture-open">Open Gesture Board</button>
+                <button class="btn btn-secondary" id="gesture-status-btn">Check Status</button>
+            </div>
+            <div id="gesture-status" style="color:var(--text-secondary);font-size:14px;margin-bottom:20px"></div>
+        </div>
+        <div class="panel">
+            <h3>Gesture Guide</h3>
+            <div class="gesture-grid">
+                <div class="gesture-card">
+                    <div class="gesture-name">Quick Pinch / Tap</div>
+                    <div class="gesture-desc">Open or close a card on the board</div>
+                </div>
+                <div class="gesture-card">
+                    <div class="gesture-name">Pinch &amp; Drag</div>
+                    <div class="gesture-desc">Move cards around the board</div>
+                </div>
+                <div class="gesture-card">
+                    <div class="gesture-name">Two-Hand Scale</div>
+                    <div class="gesture-desc">Enlarge or shrink objects with both hands</div>
+                </div>
+                <div class="gesture-card">
+                    <div class="gesture-name">Flick</div>
+                    <div class="gesture-desc">Throw objects across the board</div>
+                </div>
+                <div class="gesture-card">
+                    <div class="gesture-name">Clap</div>
+                    <div class="gesture-desc">Clear all items from the board</div>
+                </div>
+                <div class="gesture-card">
+                    <div class="gesture-name">Claw</div>
+                    <div class="gesture-desc">Force-pull distant objects toward you</div>
+                </div>
+                <div class="gesture-card">
+                    <div class="gesture-name">Empty Pinch Sideways</div>
+                    <div class="gesture-desc">Manipulate 3D object exploded view</div>
+                </div>
+            </div>
+        </div>
+    </section>
+</main>
+
+<script src="app.js"></script>
+</body>
+</html>

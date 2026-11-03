@@ -101,6 +101,10 @@
 
     function renderExecutions(data) {
         if (!executionList) return;
+        const expandedIds = new Set(
+            Array.from(executionList.querySelectorAll('details[open]'))
+                .map(card => card.dataset.executionId)
+        );
         latestExecutions = Array.isArray(data.events) ? data.events : [];
         const counts = data.counts || {};
         const running = Number(counts.running || 0);
@@ -131,10 +135,12 @@
             const latency = item.latency_ms == null
                 ? '—' : `${Number(item.latency_ms).toFixed(1)} ms`;
             const timestamp = formatExecutionTime(item.timestamp);
-            const open = status === 'running' ? ' open' : '';
+            const open = status === 'running' || expandedIds.has(item.id)
+                ? ' open' : '';
 
             return `
-                <details class="execution-card status-${status}"${open}>
+                <details class="execution-card status-${status}"
+                    data-execution-id="${escapeHtml(item.id)}"${open}>
                     <summary>
                         <span class="execution-state-dot ${status}"></span>
                         <span class="execution-name">${escapeHtml(item.name || 'unknown tool')}</span>

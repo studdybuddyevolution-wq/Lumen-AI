@@ -10,6 +10,7 @@ import contextvars
 import copy
 import hashlib
 import importlib.util
+import json
 import logging
 import re
 import sys
@@ -56,15 +57,73 @@ class ToolDefinition:
         }
 
 
+def _feature_digest(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def _verified_receipt(path: Path, digest: str) -> dict[str, Any] | None:
+    try:
+        receipt = json.loads(path.with_suffix(".verified").read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    if (
+        not isinstance(receipt, dict)
+        or receipt.get("passed") is not True
+        or receipt.get("subject_sha256") != digest
+        or not receipt.get("receipt_id")
+    ):
+        return None
+    return receipt
+
+
+def record_feature_verification(path: str | Path, receipt: Any) -> str:
+    """Persist a passing sandbox receipt for this exact feature-file digest.
+
+    receipt may be a SandboxReceipt or its JSON-compatible dictionary.
+    This is a test-evidence gate, not a cryptographic security boundary.
+    """
+    feature_path = Path(path).resolve()
+    if feature_path.suffix != ".py" or not feature_path.is_file():
+        raise ValueError("Feature verification requires an existing .py file.")
+    data = receipt.to_dict() if callable(getattr(receipt, "to_dict", None)) else receipt
+    if not isinstance(data, dict) or data.get("passed") is not True:
+        raise ValueError("A passing sandbox receipt is required.")
+    digest = _feature_digest(feature_path)
+    if data.get("subject_sha256") != digest:
+        raise ValueError("Sandbox receipt does not match the current feature file.")
+    if not data.get("receipt_id"):
+        raise ValueError("Sandbox receipt is missing its receipt ID.")
+    verification = {
+        "schema_version": 1,
+        "passed": True,
+        "receipt_id": str(data["receipt_id"]),
+        "subject_sha256": digest,
+        "source_sha256": data.get("source_sha256"),
+        "snapshot_sha256": data.get("snapshot_sha256"),
+        "checks": data.get("checks", []),
+        "verified_at": data.get("finished_at"),
+        "isolation": data.get("isolation", "unknown"),
+        "security_boundary": bool(data.get("security_boundary", False)),
+    }
+    verification_path = feature_path.with_suffix(".verified")
+    verification_path.write_text(
+        json.dumps(verification, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    return str(data["receipt_id"])
+
+
 def approve_feature_module(path: str | Path) -> str:
-    """Write a SHA-256 approval sidecar after a human has reviewed the code.
+    """Approve a feature only after its exact bytes have a passing sandbox receipt.
 
     The caller must obtain explicit user approval before invoking this helper.
     """
     feature_path = Path(path).resolve()
     if feature_path.suffix != ".py" or not feature_path.is_file():
         raise ValueError("Feature approval requires an existing .py file.")
-    digest = hashlib.sha256(feature_path.read_bytes()).hexdigest()
+    digest = _feature_digest(feature_path)
+    if _verified_receipt(feature_path, digest) is None:
+        raise ValueError("Feature must pass sandbox verification before approval.")
     feature_path.with_suffix(".approved").write_text(digest + "\n", encoding="ascii")
     return digest
 
@@ -211,6 +270,10 @@ class ToolRegistry:
             return False
         return stored == digest
 
+    @staticmethod
+    def _is_verified(path: Path, digest: str) -> bool:
+        return _verified_receipt(path, digest) is not None
+
     def _load_feature(self, path: Path) -> bool:
         source = str(path.resolve())
         previous = {
@@ -270,7 +333,10 @@ class ToolRegistry:
                 continue
 
             old_signature = self._signatures.get(path.name)
-            approved = self._is_approved(path, signature[2])
+            approved = (
+                self._is_approved(path, signature[2])
+                and self._is_verified(path, signature[2])
+            )
             if old_signature == signature and approved:
                 current[path.name] = signature
                 results[path.name] = "unchanged"
@@ -286,7 +352,9 @@ class ToolRegistry:
                             sys.modules.pop(module_name, None)
                     results[path.name] = "revoked: approval marker missing or stale"
                 else:
-                    results[path.name] = "skipped: missing or stale approval hash"
+                    results[path.name] = (
+                        "skipped: missing or stale sandbox verification or approval hash"
+                    )
                 if old_signature is not None and old_signature != signature:
                     current[path.name] = old_signature
                 continue

@@ -56,11 +56,16 @@ def _now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="milliseconds")
 
 
+def _redact_private_key_block(match: re.Match[str]) -> str:
+    """Hide a PEM block while preserving its original newline count."""
+    return "[private-key-redacted]" + ("\n" * match.group(0).count("\n"))
+
+
 def redact_text(value: str, *, limit: int = _MAX_MESSAGE_CHARS) -> str:
     """Remove common inline credentials and bound untrusted diagnostic text."""
     text = str(value or "")
     if _PRIVATE_KEY_BLOCK_RE.search(text):
-        text = _PRIVATE_KEY_BLOCK_RE.sub("[private-key-redacted]", text)
+        text = _PRIVATE_KEY_BLOCK_RE.sub(_redact_private_key_block, text)
     text = _WINDOWS_USER_PATH_RE.sub("%USERPROFILE%", text)
     text = _POSIX_HOME_PATH_RE.sub("%HOME%", text)
     text = _SECRET_ASSIGNMENT_RE.sub(lambda match: match.group("key") + "=[redacted]", text)
@@ -76,7 +81,7 @@ def redact_text(value: str, *, limit: int = _MAX_MESSAGE_CHARS) -> str:
 
 def _sanitise_source_lines(source: str) -> list[str]:
     """Redact multiline private-key blocks before selecting individual lines."""
-    without_private_keys = _PRIVATE_KEY_BLOCK_RE.sub("[private-key-redacted]", source)
+    without_private_keys = _PRIVATE_KEY_BLOCK_RE.sub(_redact_private_key_block, source)
     return [redact_text(line, limit=300) for line in without_private_keys.splitlines()]
 
 

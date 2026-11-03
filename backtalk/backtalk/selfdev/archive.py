@@ -149,6 +149,13 @@ def _safety_passed(safety: Mapping[str, Any] | None) -> bool:
     )
 
 
+def _receipt_passes(receipt: SandboxReceipt | None, required: set[str]) -> bool:
+    if receipt is None or not receipt.passed:
+        return False
+    names = {check.name for check in receipt.checks if check.passed}
+    return required.issubset(names) and all(check.passed for check in receipt.checks)
+
+
 @dataclass(frozen=True, slots=True)
 class CandidateRecord:
     candidate_id: str
@@ -338,7 +345,8 @@ class CandidateArchive:
             or not _BRANCH_PATTERN.fullmatch(source_branch)
             or ".." in source_branch
             or "//" in source_branch
-            or source_branch.endswith(("/", ".lock"))
+            or source_branch.endswith(("/", ".", ".lock"))
+            or "@{" in source_branch
         ):
             raise ArchiveError("source_branch is not a safe Git branch name.")
         if source_commit is not None and (
@@ -354,6 +362,8 @@ class CandidateArchive:
         if not isinstance(suite_version, str) or not suite_version.strip() or len(suite_version) > 128:
             raise ArchiveError("suite_version must contain 1-128 characters.")
 
+        if not isinstance(changed_files, (tuple, list)):
+            raise ArchiveError("changed_files must be a list or tuple of project-relative paths.")
         safe_files = tuple(_safe_relative_path(item) for item in changed_files)
         if len(safe_files) > 500 or len(set(safe_files)) != len(safe_files):
             raise ArchiveError("changed_files must contain at most 500 unique project-relative paths.")
@@ -453,7 +463,7 @@ class CandidateArchive:
         activates the candidate in Lumen.
         """
         candidate = self.get_candidate(candidate_id)
-        if decision not in {"retain", "reject", "promote"}:
+        if not isinstance(decision, str) or decision not in {"retain", "reject", "promote"}:
             raise ArchiveError("decision must be retain, reject, or promote.")
         if not isinstance(reason, str) or not reason.strip() or len(reason.strip()) > 1000:
             raise ArchiveError("decision reason must contain 1-1000 characters.")
@@ -588,7 +598,10 @@ class CandidateEvaluationController:
                 checks=("compileall",),
                 timeout_seconds=timeout_seconds,
             )
-            if smoke.passed and smoke.source_sha256 == candidate.source_sha256:
+            if (
+                _receipt_passes(smoke, {"compileall"})
+                and smoke.source_sha256 == candidate.source_sha256
+            ):
                 regression = self.sandbox_runner.run_checks(
                     source_root,
                     checks=("compileall", "unittest"),
@@ -604,11 +617,13 @@ class CandidateEvaluationController:
 
         if not integrity_ok:
             failure_stage = "source_integrity"
-        elif smoke is None or not smoke.passed or smoke.source_sha256 != candidate.source_sha256:
+        elif (
+            not _receipt_passes(smoke, {"compileall"})
+            or smoke.source_sha256 != candidate.source_sha256
+        ):
             failure_stage = "smoke"
         elif (
-            regression is None
-            or not regression.passed
+            not _receipt_passes(regression, {"compileall", "unittest"})
             or regression.source_sha256 != candidate.source_sha256
         ):
             failure_stage = "regression"

@@ -145,6 +145,24 @@ class CandidateArchiveTests(unittest.TestCase):
         self.assertEqual(self.archive.get_candidate(candidate.candidate_id), candidate)
         self.assertEqual(self.archive.list_candidates(), [candidate])
 
+    def test_candidate_metadata_is_optional_and_round_trips_as_json(self) -> None:
+        expected_id = uuid.uuid4().hex
+        candidate = self.archive.add_candidate(
+            self.project,
+            source_branch="feature/metadata",
+            improvement_summary="Record additional candidate audit context.",
+            suite_version=SUITE,
+            metadata={"skill_forge": {"worktree_ref": expected_id, "schema_version": 1}},
+            candidate_id=expected_id,
+        )
+
+        self.assertEqual(candidate.candidate_id, expected_id)
+        self.assertEqual(candidate.metadata["skill_forge"]["schema_version"], 1)
+        self.assertEqual(
+            self.archive.get_candidate(candidate.candidate_id).metadata,
+            candidate.metadata,
+        )
+
     def test_archive_must_be_outside_candidate_source_tree(self) -> None:
         with self.assertRaisesRegex(ArchiveError, "outside"):
             CandidateArchive(self.project / "archive").add_candidate(

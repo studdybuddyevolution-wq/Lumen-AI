@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -94,6 +95,18 @@ class BugHunterTests(unittest.TestCase):
         self.assertNotIn("C:\\Users\\Arin", redacted)
         self.assertNotIn("secret-material", redacted)
         self.assertIn("%USERPROFILE%", redacted)
+
+    def test_in_project_symlink_is_not_followed_for_source_context(self) -> None:
+        alias = self.root / "alias.py"
+        try:
+            os.symlink(self.source, alias)
+        except (OSError, NotImplementedError):
+            self.skipTest("This Windows environment does not permit creating file symlinks.")
+
+        report = self.hunter.capture_traceback(self.make_traceback(path=alias))
+
+        self.assertIsNone(report.primary_file)
+        self.assertEqual(report.frames, ())
 
     def test_repeated_failures_are_deduplicated_and_counted(self) -> None:
         first = self.hunter.capture_traceback(self.make_traceback(message="failure 123"))

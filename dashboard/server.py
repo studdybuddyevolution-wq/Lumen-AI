@@ -163,6 +163,18 @@ class DashboardHandler(SimpleHTTPRequestHandler):
             self._json_response(data, status_code)
             return
 
+        if route == "/api/executions":
+            params = parse_qs(parsed.query)
+            try:
+                limit = max(1, min(int(params.get("limit", ["30"])[0]), 100))
+            except (TypeError, ValueError):
+                limit = 30
+            status_code, data = bridge_request(
+                f"/bridge/executions?limit={limit}"
+            )
+            self._json_response(data, status_code)
+            return
+
         if route == "/api/approval":
             status_code, data = bridge_request("/bridge/approval")
             self._json_response(data, status_code)

@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import ast
 import hashlib
+import os
 import re
 import threading
 import traceback
@@ -109,13 +110,18 @@ def _resolve_project_file(project_root: Path, filename: str) -> tuple[Path, str]
         raw = Path(filename)
         if not raw.is_absolute():
             raw = project_root / raw
-        resolved = raw.resolve(strict=True)
-        relative = resolved.relative_to(project_root)
+        lexical_path = Path(os.path.abspath(str(raw)))
+        lexical_relative = lexical_path.relative_to(project_root)
+
+        # Check the original lexical components before resolve() follows links.
         cursor = project_root
-        for part in relative.parts:
+        for part in lexical_relative.parts:
             cursor = cursor / part
             if cursor.is_symlink():
                 return None
+
+        resolved = lexical_path.resolve(strict=True)
+        relative = resolved.relative_to(project_root)
         if not resolved.is_file() or resolved.stat().st_size > _MAX_SOURCE_BYTES:
             return None
         return resolved, relative.as_posix()

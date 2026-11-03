@@ -22,7 +22,7 @@ import uuid
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Iterable
+from typing import BinaryIO, Iterable
 
 _ALLOWED_CHECKS = frozenset({"compileall", "unittest", "pytest"})
 _IGNORED_DIRS = frozenset({
@@ -200,19 +200,20 @@ def _terminate_process(process: subprocess.Popen) -> None:
             pass
 
 
-def _capture_stream(stream) -> str:
-    """Drain a child pipe while retaining only a bounded output prefix."""
+def _capture_stream(stream: BinaryIO) -> str:
+    """Drain a child pipe and close it, retaining only a bounded output prefix."""
     captured = bytearray()
     truncated = False
-    while True:
-        chunk = stream.read(8192)
-        if not chunk:
-            break
-        available = _MAX_OUTPUT_CHARS - len(captured)
-        if available > 0:
-            captured.extend(chunk[:available])
-        if len(chunk) > available:
-            truncated = True
+    with stream:
+        while True:
+            chunk = stream.read(8192)
+            if not chunk:
+                break
+            available = _MAX_OUTPUT_CHARS - len(captured)
+            if available > 0:
+                captured.extend(chunk[:available])
+            if len(chunk) > available:
+                truncated = True
     text = captured.decode("utf-8", errors="replace")
     if truncated:
         text += "\n[output truncated]"
@@ -379,3 +380,10 @@ class SandboxRunner:
             security_boundary=False,
             warnings=warnings,
         )
+
+def project_tree_digest(source_dir: str | Path) -> str:
+    """Return the same filtered SHA-256 digest used by sandbox verification."""
+    root = Path(source_dir).expanduser().resolve()
+    if not root.is_dir():
+        raise SandboxError(f"Source directory does not exist: {root}")
+    return _tree_digest(root)

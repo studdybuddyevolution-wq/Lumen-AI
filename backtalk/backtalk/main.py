@@ -30,11 +30,10 @@ session itself so you never go back to the keyboard: "clear the
 session" / "compact the session" / "switch to the deep model" / "back
 to the fast model" / "set effort to low" (or medium, high, max) /
 "usage report" / "go hands free" and "push to talk mode" (the MIC) /
-"stop asking for permission" and "start asking again" (permissions,
-called auto-approve, a different axis than the microphone on purpose).
-And with permission_mode "ask" (the default), gated tool calls ASK OUT
-LOUD and your spoken yes or no decides them; any other answer is
-passed back to the agent as the reason.
+Routine requested desktop actions execute without a per-action prompt,
+inside Lumen's configured workspace, allowlist and protected-operation
+rules. Generated Python features and auto-heal patches have separate
+human review and approval steps.
 
 Flags:
   --open-mic   start in hands-free listening for this session (the
@@ -73,12 +72,8 @@ from backtalk.vlog import log
 NAME = CFG["name"]
 QUIT_PHRASES = CFG["quit_phrases"]
 
-# ---- THE SPOKEN PERMISSION GATE (permission_mode "ask", the default).
-# When the agent wants a gated tool, the SDK routes the decision here:
-# the ask is spoken, the turn pauses (the SDK waits indefinitely; the
-# timeout below is ours), and the NEXT utterance or typed line is the
-# answer. "yes" approves; anything else denies, with the user's own
-# words passed back as the reason. Silence means no.
+# Legacy permission-gate helpers remain import-compatible, but are not
+# passed to WarmBrain. Routine desktop actions use the registry directly.
 PERM_TIMEOUT_S = 75
 _PERM = {"fut": None, "asked_at": 0.0,   # pending ask + when it was posed
          "hinted": False, "pending": None}  # escape-hatch hint said yet?
@@ -96,7 +91,6 @@ _INTERRUPT_ANSWER = "\x00interrupt"      # sentinel: turn is being killed
 # SDK routes here. (Auto-approve is about PERMISSIONS; hands-free
 # LISTENING is about the microphone: see _MIC below. Two different
 # axes, deliberately never sharing a name.)
-_AUTOAPPROVE = {"on": False}
 # The microphone mode, switchable live by voice. "ptt" = mic closed
 # except while the key is held. "open" = hands-free listening (VAD).
 # The key keeps working in open mode: it interrupts, and holding it
@@ -317,19 +311,6 @@ CONSOLE_VERBS = {
                   "hands free listening", "open mic", "open the mic"),
     "micptt":    ("push to talk", "push to talk mode",
                   "back to push to talk", "back to the button"),
-    "noask":     ("stop asking for permission",
-                  "stop asking permission",
-                  "stop asking me for permission",
-                  "turn off the permission prompt",
-                  "turn off the permission prompts",
-                  "turn off the permissions prompt",
-                  "turn off the permissions prompts",
-                  "turn off permissions", "turn off permission checks",
-                  "disable the permission checks",
-                  "disable permission checks", "auto approve",
-                  "auto approve mode"),
-    "ask":       ("start asking again", "ask before acting",
-                  "ask for permission again"),
 }
 _EFFORTS = ("low", "medium", "high", "xhigh", "max")
 
@@ -655,8 +636,6 @@ async def amain():
         except IndexError:
             pass
 
-    CFG_BOOT_MODE = CFG["permission_mode"]
-    _AUTOAPPROVE["on"] = False
     _MIC["mode"] = "open" if (open_mic
                               or CFG.get("mic_mode") == "open") else "ptt"
     # resume_last_session: reattach to the saved conversation, if any
@@ -671,9 +650,7 @@ async def amain():
 
     mouth = Mouth()
     ears = Ears()
-    brain = WarmBrain(model=model,
-                      can_use_tool=make_permission_gate(mouth),
-                      resume_id=resume_id)
+    brain = WarmBrain(model=model, resume_id=resume_id)
 
     mode = ("hands-free listening (the talk key still works)"
             if _MIC["mode"] == "open"
@@ -797,42 +774,6 @@ async def amain():
                 key = str(CFG.get("ptt_key", "home")).replace("_", " ")
                 mouth.say(f"Push to talk. Hold the {key} key and "
                           "talk; the mic stays closed otherwise.")
-        elif verb == "noask":
-            resp = ""
-            _CONFIRM["verb"] = None
-            mouth.say("Approval checks stay on. I will always ask before actions.")
-        elif verb == "noask:confirmed":
-            resp = ""
-            _CONFIRM["verb"] = None
-            mouth.say("I can't disable action approvals. They stay enabled.")
-        elif verb == "ask":
-            resp = ""
-            saved = _write_config_key("permission_mode", "ask")
-            _AUTOAPPROVE["on"] = False
-            flipped = True
-            if CFG_BOOT_MODE == "bypassPermissions":
-                # a bypass-booted session never consults the gate, so
-                # the SDK itself must flip (the safe direction is
-                # allowed live). If that fails, saying "done" would be
-                # a lie: the agent would keep acting silently.
-                try:
-                    await brain.set_permission_mode("ask")
-                except Exception as e:
-                    flipped = False
-                    log(f"[console] live flip to ask FAILED: {e}")
-            log("[console] permission_mode -> ask"
-                + (" (saved)" if saved else " (session only)"))
-            if flipped:
-                mouth.say("Done. I'll ask out loud before real "
-                          "actions"
-                          + (", and that's saved as your default."
-                             if saved else
-                             ". The config file couldn't be written, "
-                             "so tell me again after a restart."))
-            else:
-                mouth.say("I saved asking as your default, but this "
-                          "session couldn't switch over. Restart the "
-                          "voice line to get asking back.")
         else:
             resp = ""
         if say_after:

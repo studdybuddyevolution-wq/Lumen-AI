@@ -52,3 +52,4 @@ Desktop.ini
 **/*.before-*
 *.bak
 *.backup
+*.approved

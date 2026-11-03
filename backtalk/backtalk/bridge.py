@@ -2,7 +2,7 @@
 
 Runs an asyncio HTTP server on localhost:8796 inside the Backtalk voice process.
 Allows the Lumen Dashboard to communicate with the single shared WarmBrain instance,
-access conversation history, submit typed messages, and respond to approval prompts.
+access conversation history and submit typed messages. Routine action approvals are not used.
 """
 from __future__ import annotations
 
@@ -171,11 +171,18 @@ async def _send_response(writer: asyncio.StreamWriter, status: int, data: dict[s
 
 
 def _get_status() -> dict[str, Any]:
-    """Return live status of the Backtalk runtime."""
+    """Return live runtime and tool-registry status."""
     speaking = _mouth.speaking if _mouth is not None else False
     model_name = getattr(_brain, "model", CFG.get("model", "qwen3.5:4b"))
     turns = _brain.session.get("turns", 0) if _brain is not None else 0
-    pending = _perm_dict.get("pending") if _perm_dict else None
+    registry = getattr(_brain, "_registry", None) if _brain is not None else None
+    tools = registry.list_tools() if registry is not None else []
+    feature_sources = {
+        item.source.replace("\\", "/")
+        for item in tools
+        if item.source != "builtin"
+        and not item.source.replace("\\", "/").endswith("/features/core_tools.py")
+    }
 
     return {
         "status": "online",
@@ -184,8 +191,10 @@ def _get_status() -> dict[str, Any]:
         "name": CFG.get("name", "Lumen"),
         "speaking": speaking,
         "turns": turns,
-        "pending_approval": bool(pending),
-        "permission_mode": CFG.get("permission_mode", "ask"),
+        "execution_mode": "autonomous",
+        "registered_tools": len(tools),
+        "feature_modules": len(feature_sources),
+        "pending_approval": False,
     }
 
 
@@ -214,30 +223,16 @@ def _get_history() -> dict[str, Any]:
 
 
 def _get_approval() -> dict[str, Any]:
-    """Return pending approval information."""
-    if not _perm_dict:
-        return {"pending": None}
-    return {"pending": _perm_dict.get("pending")}
+    """Legacy endpoint retained for compatibility; no routine approvals exist."""
+    return {"pending": None, "enabled": False}
 
 
 def _handle_approval(body: bytes) -> dict[str, Any]:
-    """Process an approval decision from the dashboard."""
-    if not _perm_dict:
-        return {"status": "error", "message": "No permission system active"}
-
-    try:
-        data = json.loads(body.decode("utf-8") if body else "{}")
-        approved = bool(data.get("approved", False))
-    except Exception:
-        approved = False
-
-    fut = _perm_dict.get("fut")
-    if fut is not None and not fut.done():
-        decision = "yes" if approved else "no"
-        fut.set_result(decision)
-        log(f"[bridge] approval decided via dashboard: {decision}")
-        return {"status": "ok", "decision": "allowed" if approved else "denied"}
-    return {"status": "none_pending", "message": "No approval request was pending"}
+    """Reject legacy dashboard approval submissions without changing state."""
+    return {
+        "status": "disabled",
+        "message": "Routine desktop-action approvals are disabled.",
+    }
 
 
 async def start_bridge_server():

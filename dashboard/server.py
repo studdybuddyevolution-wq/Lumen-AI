@@ -1,13 +1,13 @@
 """Lumen Dashboard — lightweight local web server.
 
-Serves the dashboard UI and bridges typed chat and approvals directly
+Serves the dashboard UI and bridges typed chat directly
 to the WarmBrain runtime inside the Backtalk process on localhost:8796.
 
 Architecture:
 - The Backtalk process is the PRIMARY runtime (owns WarmBrain and all tools).
 - This dashboard connects to Backtalk's bridge on port 8796.
 - Both voice and typed chat share the exact same WarmBrain instance and history.
-- Approvals can be granted either by voice or through the dashboard UI.
+- Routine desktop-action approvals are disabled; runtime safety checks remain active.
 """
 from __future__ import annotations
 
@@ -112,9 +112,11 @@ def get_status() -> dict:
         "kokoro": "loaded" if voice_running else "not loaded",
         "memory": str(vault) if vault else "not configured",
         "barehands": "running" if barehands_running else "stopped",
-        "permissions": bridge_data.get("permission_mode", "ask"),
+        "execution_mode": bridge_data.get("execution_mode", "autonomous"),
+        "registered_tools": bridge_data.get("registered_tools", 0),
+        "feature_modules": bridge_data.get("feature_modules", 0),
         "turns": bridge_data.get("turns", 0),
-        "pending_approval": bridge_data.get("pending_approval", False),
+        "pending_approval": False,
     }
 
 

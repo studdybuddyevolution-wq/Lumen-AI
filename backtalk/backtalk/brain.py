@@ -1,8 +1,7 @@
-"""Lumen's local Ollama brain for Backtalk.
+"""Lumen's local Ollama brain with a validated, hot-reloadable tool registry.
 
-Preserves Backtalk's WarmBrain interface while replacing the Claude Agent
-SDK with Ollama's native chat/tool-calling API. Every mutating desktop tool
-is gated by Backtalk's spoken permission callback.
+The model is shown a relevance-ranked tool subset. Every returned tool call
+is validated against its registered JSON Schema before execution.
 """
 from __future__ import annotations
 
@@ -14,8 +13,12 @@ from typing import Any
 
 import httpx
 
+from pathlib import Path
+
 from backtalk.config import CFG, DISCIPLINE
-from backtalk.tools import TOOL_DEFINITIONS, TOOL_META, execute_tool
+from backtalk.registry import DEFAULT_REGISTRY, ToolValidationError
+from backtalk.features import core_tools as _core_tools  # registers trusted built-ins
+from backtalk.router import ToolRouter
 from backtalk.vlog import log
 
 _SENTENCE_END = re.compile(r"(?<=[.!?])\s+")
@@ -23,11 +26,13 @@ _SENTENCE_END = re.compile(r"(?<=[.!?])\s+")
 
 @dataclass
 class PermissionResultAllow:
+    """Legacy import compatibility; the registry no longer uses action prompts."""
     behavior: str = "allow"
 
 
 @dataclass
 class PermissionResultDeny:
+    """Legacy import compatibility; the registry no longer uses action prompts."""
     behavior: str = "deny"
     message: str = "The user denied this action."
     interrupt: bool = False
@@ -39,7 +44,12 @@ class WarmBrain:
     def __init__(self, model: str | None = None, can_use_tool=None,
                  resume_id: str | None = None):
         self.model = model or CFG.get("model", "qwen3.5:4b")
-        self._can_use_tool = can_use_tool
+        # Keep can_use_tool accepted for older launchers; routine actions no
+        # longer use an interactive approval callback.
+        self._registry = DEFAULT_REGISTRY
+        self._router = ToolRouter(max_tools=8, min_tools=5)
+        self._feature_dir = Path(__file__).resolve().parent / "features"
+        self._features_loaded = False
         self._http: httpx.AsyncClient | None = None
         self._messages: list[dict[str, Any]] = []
         self._system_message: dict[str, str] | None = None
@@ -58,17 +68,21 @@ class WarmBrain:
             "Your brain is a locally running Ollama model. Be helpful, "
             "accurate, practical, and conversational. Address the user as Arin.",
             "You can use the supplied tools to inspect files and perform "
-            "approved desktop actions. Never claim an action succeeded "
-            "unless its tool result confirms success.",
-            "Read-only tools may be used when relevant. Every command, "
-            "file creation or edit, application launch, and path opening "
-            "requires an explicit approval prompt from the permission gate. "
-            "Never try to bypass, talk around, or disable that gate. If an "
-            "action is denied, respect the decision and offer another approach.",
-            "Use PowerShell for Windows automation, but keep commands focused. "
-            "Never run destructive commands, delete user data, change security "
-            "settings, or install software without a clear user request and "
-            "approval. Ask for clarification before acting on ambiguous paths.",
+            "ordinary desktop actions requested by the user. Never claim an "
+            "action succeeded unless its tool result confirms success.",
+            "Ordinary actions such as opening allowlisted applications, opening "
+            "workspace paths, creating new files, editing files with backups, "
+            "and running permitted PowerShell commands execute without repetitive "
+            "approval prompts after the user requests them.",
+            "Stay inside configured workspaces and application allowlists. "
+            "Never delete user data, format drives, shut down or restart the "
+            "computer, alter security settings, bypass Windows UAC, or install "
+            "software through general automation. These blocked-operation rules "
+            "remain active. Ask before high-impact operations or when a target "
+            "is ambiguous.",
+            "New Python feature modules and generated auto-heal patches are "
+            "different from ordinary desktop actions: they require explicit "
+            "human review and approval before they may be installed or applied.",
             "Use the memory vault as a set of user-owned notes. Do not invent "
             "memories or silently overwrite notes. When editing an existing "
             "file, use the edit tool so a backup is created first.",
@@ -102,6 +116,15 @@ class WarmBrain:
         return "\n\n".join(parts)
 
     async def start(self):
+        if not self._features_loaded:
+            statuses = self._registry.load_features(self._feature_dir)
+            self._registry.start_watcher(self._feature_dir)
+            self._features_loaded = True
+            loaded = sum(1 for status in statuses.values() if status == "loaded")
+            log(
+                f"[brain] tool registry ready: {len(self._registry.list_tools())} "
+                f"tools; {loaded} feature module(s) loaded"
+            )
         if self._http is None:
             timeout = httpx.Timeout(180.0, connect=8.0)
             self._http = httpx.AsyncClient(timeout=timeout)
@@ -120,10 +143,8 @@ class WarmBrain:
         log(f"[brain] connected to local Ollama at {self._base_url}; model={self.model}")
 
     async def set_permission_mode(self, backtalk_mode: str):
-        # Lumen intentionally has no auto-approve mode.
-        if backtalk_mode not in ("ask", "default"):
-            log("[brain] ignored request to disable action approvals")
-        CFG["permission_mode"] = "ask"
+        # Compatibility shim for older dashboard and console clients.
+        log("[brain] routine action prompts are disabled; safety checks remain active")
 
     async def context_usage(self):
         # Ollama's local endpoint does not provide the Claude-style breakdown.
@@ -161,6 +182,7 @@ class WarmBrain:
         self._dirty = False
 
     async def stop(self):
+        self._registry.stop_watcher()
         if self._http is not None:
             await self._http.aclose()
             self._http = None
@@ -168,10 +190,23 @@ class WarmBrain:
     async def _chat(self) -> dict[str, Any]:
         if self._http is None:
             await self.start()
+        latest_user = next(
+            (
+                str(message.get("content") or "")
+                for message in reversed(self._messages)
+                if message.get("role") == "user"
+            ),
+            "",
+        )
+        selected_tools = self._router.select(
+            latest_user, self._registry.list_tools()
+        )
         payload = {
             "model": self.model,
             "messages": self._messages,
-            "tools": TOOL_DEFINITIONS,
+            "tools": self._registry.declarations(
+                [item.name for item in selected_tools]
+            ),
             "stream": False,
             "think": False,
             "options": {"num_ctx": self._num_ctx},
@@ -198,31 +233,20 @@ class WarmBrain:
     async def _run_tool(self, call: dict[str, Any]) -> str:
         fn = call.get("function") or {}
         name = str(fn.get("name") or "")
-        meta = TOOL_META.get(name)
-        if meta is None:
+        if self._registry.get(name) is None:
             return f"Tool rejected: {name!r} is not available to Lumen."
         try:
             args = self._parse_arguments(fn.get("arguments", {}))
-        except (TypeError, ValueError, json.JSONDecodeError) as exc:
-            return f"Tool rejected: invalid arguments ({exc})."
-
-        if meta.get("approval", False):
-            if self._can_use_tool is None:
-                return "Action denied: no approval handler is available."
-            gate_name, gate_input, ctx = meta["permission"](args)
-            decision = await self._can_use_tool(gate_name, gate_input, ctx)
-            if getattr(decision, "behavior", "deny") != "allow":
-                reason = getattr(decision, "message", "The user denied this action.")
-                return f"Action denied. {reason}"
-        try:
-            result = await asyncio.to_thread(execute_tool, name, args)
+            result = await asyncio.to_thread(self._registry.execute, name, args)
+        except (TypeError, ValueError, json.JSONDecodeError, ToolValidationError) as exc:
+            return f"Tool rejected: invalid arguments or schema mismatch ({exc})."
         except Exception as exc:
             log(f"[tools] {name} failed: {exc!r}")
             return f"Tool error: {type(exc).__name__}: {exc}"
         return str(result)[:12000]
 
     async def ask_stream(self, utterance: str):
-        """Run an Ollama conversation, dispatch approved tools, then speak text."""
+        """Run an Ollama conversation, validate and dispatch tools, then speak text."""
         if self._http is None or self._system_message is None:
             await self.start()
         self._messages.append({"role": "user", "content": utterance})

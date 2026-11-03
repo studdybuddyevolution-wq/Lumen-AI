@@ -15,7 +15,7 @@ Then open http://127.0.0.1:8795 in your browser.
 
 - **Home** — System status for all Lumen components
 - **Chat** — Typed conversation with Lumen (uses Ollama directly)
-- **Approvals** — Review and approve/deny pending actions
+- **Execution Mode** — View autonomous execution state and registered tool/feature counts
 - **Memory** — Search and browse the Obsidian memory vault
 - **Desktop** — Launch applications and run commands
 - **Gestures** — Barehands gesture control and tutorials

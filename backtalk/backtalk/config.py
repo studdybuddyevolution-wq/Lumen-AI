@@ -57,26 +57,9 @@ DEFAULTS = {
     # lasts one session and is always spoken; this default never moves
     # by itself.
     "deep_model": "qwen3.5:4b",
-    # Tool permissions for the voice session. "ask" is the default ON
-    # PURPOSE (safety is opt-out, never opt-in): when the agent wants a
-    # gated tool (write a file, run a real command), it ASKS OUT LOUD
-    # and waits. Answer by voice or by typing. An EXACT yes approves
-    # ("yes", "yeah", "go ahead", "approved"...); anything else denies,
-    # and your words are passed back to the agent as the reason, so
-    # "no, put it in drafts instead" actually steers it. No answer
-    # within 75 seconds means no, out loud. Most read-only work passes
-    # without asking; anything that changes things asks.
-    # "bypassPermissions" is AUTO-APPROVE: the agent acts without
-    # asking, exactly like a terminal session with approvals off.
-    # (Not to be confused with hands-free LISTENING, which is about
-    # the microphone: see mic_mode below.) Never hand-edit this file
-    # to switch: tell your agent to change it (takes effect next
-    # launch), or say "stop asking for permission" (then "confirm")
-    # or "start asking again" inside a voice session for an immediate
-    # flip that also saves. The legacy value "default" now
-    # behaves as "ask" (a headless voice session could never render
-    # the terminal prompt it promised).
-    "permission_mode": "ask",
+    # Routine desktop actions run autonomously after the user requests them.
+    # Workspace, application allowlist, and blocked-operation safeguards remain active.
+    "execution_mode": "autonomous",
     # Which of your agent's skills the voice session can SEE. null keeps the
     # CLI's own default (all of them). [] hides every one. A list names the
     # ones to allow.
@@ -233,16 +216,14 @@ DISCIPLINE = (
     "ids: name the thing, not the address. "
     "Skip any startup sequence; answer directly. "
     "VOICE CONSOLE FACTS, answer from these whenever the person asks "
-    "you to change a voice-line setting: this session is controlled "
-    "by exact spoken phrases, never by you. Permissions: 'stop "
-    "asking for permission' (then 'confirm'), or 'start asking "
-    "again'. Microphone: 'go hands free', or 'push to talk mode'. "
+    "you to change a voice-line setting: microphone mode can be switched "
+    "with 'go hands free' or 'push to talk mode'. Ordinary requested "
+    "desktop actions execute under Lumen's workspace and safety rules. "
     "Also: 'clear the session', 'compact the session', 'switch to "
     "the deep model', 'back to the fast model', 'set effort to low' "
     "(or medium, high, max), and 'usage report'. You cannot flip "
     "these live yourself, so when asked, give the person the exact "
-    "phrase to SAY. Editing backtalk.json only changes the default "
-    "for the NEXT launch."
+    "phrase to SAY."
 )
 
 

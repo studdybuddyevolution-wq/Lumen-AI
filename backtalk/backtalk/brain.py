@@ -294,7 +294,11 @@ class WarmBrain:
     async def ask_stream(self, utterance: str):
         """Run an Ollama conversation, validate and dispatch tools, then speak text."""
         if self._http is None or self._system_message is None:
-            await self.start()
+            try:
+                await self.start()
+            except Exception as exc:
+                self.bug_hunter.capture_exception(exc, component="ollama_start")
+                raise
         self._messages.append({"role": "user", "content": utterance})
         self._dirty = True
         try:

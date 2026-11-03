@@ -2,7 +2,7 @@
 
 Feature modules are trusted local Python extensions, not sandboxed code.
 Built-in modules are part of the application. Additional modules load only
-when their adjacent .approved file contains the module's current SHA-256.
+when passing sandbox evidence and an explicit approval both match their bytes.
 """
 from __future__ import annotations
 
@@ -61,6 +61,15 @@ def _feature_digest(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+def _has_required_checks(checks: Any) -> bool:
+    if not isinstance(checks, list):
+        return False
+    if not all(isinstance(item, dict) and item.get("passed") is True for item in checks):
+        return False
+    names = {item.get("name") for item in checks}
+    return "compileall" in names and bool({"unittest", "pytest"} & names)
+
+
 def _verified_receipt(path: Path, digest: str) -> dict[str, Any] | None:
     try:
         receipt = json.loads(path.with_suffix(".verified").read_text(encoding="utf-8"))
@@ -68,9 +77,11 @@ def _verified_receipt(path: Path, digest: str) -> dict[str, Any] | None:
         return None
     if (
         not isinstance(receipt, dict)
+        or receipt.get("schema_version") != 1
         or receipt.get("passed") is not True
         or receipt.get("subject_sha256") != digest
         or not receipt.get("receipt_id")
+        or not _has_required_checks(receipt.get("checks"))
     ):
         return None
     return receipt
@@ -85,9 +96,17 @@ def record_feature_verification(path: str | Path, receipt: Any) -> str:
     feature_path = Path(path).resolve()
     if feature_path.suffix != ".py" or not feature_path.is_file():
         raise ValueError("Feature verification requires an existing .py file.")
-    data = receipt.to_dict() if callable(getattr(receipt, "to_dict", None)) else receipt
-    if not isinstance(data, dict) or data.get("passed") is not True:
+    from backtalk.selfdev.sandbox import SandboxReceipt
+
+    if not isinstance(receipt, SandboxReceipt):
+        raise ValueError("A SandboxReceipt returned by SandboxRunner is required.")
+    data = receipt.to_dict()
+    if data.get("passed") is not True:
         raise ValueError("A passing sandbox receipt is required.")
+    if not _has_required_checks(data.get("checks")):
+        raise ValueError(
+            "Sandbox receipt must include passing compileall and unittest or pytest checks."
+        )
     digest = _feature_digest(feature_path)
     if data.get("subject_sha256") != digest:
         raise ValueError("Sandbox receipt does not match the current feature file.")

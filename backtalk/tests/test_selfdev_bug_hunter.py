@@ -213,6 +213,8 @@ class BugHunterTests(unittest.TestCase):
         self.assertEqual(payload["events_seen"], 1)
         self.assertEqual(payload["unique_reports"], 1)
         self.assertEqual(len(payload["reports"]), 1)
+        self.assertNotIn("source_context", payload["reports"][0])
+        self.assertNotIn("source_line", str(payload["reports"][0]["frames"]))
         self.assertNotIn(str(self.root), str(payload))
 
 

@@ -5,6 +5,7 @@
     const API = '';
     let currentPage = 'home';
     let statusInterval = null;
+    let executionInterval = null;
 
     // Navigation
     document.querySelectorAll('.nav-item').forEach(btn => {
@@ -21,7 +22,10 @@
         document.querySelector(`[data-page="${page}"]`)?.classList.add('active');
         document.getElementById(`page-${page}`)?.classList.add('active');
 
-        if (page === 'home') refreshStatus();
+        if (page === 'home') {
+            refreshStatus();
+            refreshExecutions();
+        }
         if (page === 'chat') syncChatHistory();
     }
 
@@ -69,6 +73,118 @@
             </div>
         `).join('');
     }
+
+    // ==========================================
+    // Tool Execution Activity
+    // ==========================================
+    const executionList = document.getElementById('execution-list');
+    const executionSummary = document.getElementById('execution-summary');
+    const executionInspector = document.getElementById('execution-inspector');
+    let latestExecutions = [];
+    let executionsLoading = false;
+
+    async function refreshExecutions() {
+        if (executionsLoading) return;
+        executionsLoading = true;
+        try {
+            const resp = await fetch(`${API}/api/executions?limit=30`, {
+                cache: 'no-store',
+            });
+            if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+            renderExecutions(await resp.json());
+        } catch (e) {
+            console.error('Execution history fetch failed:', e);
+        } finally {
+            executionsLoading = false;
+        }
+    }
+
+    function renderExecutions(data) {
+        if (!executionList) return;
+        latestExecutions = Array.isArray(data.events) ? data.events : [];
+        const counts = data.counts || {};
+        const running = Number(counts.running || 0);
+        const failed = Number(counts.failed || 0);
+        const denied = Number(counts.denied || 0);
+        if (executionSummary) {
+            executionSummary.textContent =
+                `${data.count ?? latestExecutions.length} recent · ${running} running · ${failed} failed · ${denied} denied`;
+        }
+
+        if (latestExecutions.length === 0) {
+            executionList.innerHTML =
+                '<div class="empty-state"><p>No tool calls recorded yet.</p></div>';
+            return;
+        }
+
+        executionList.innerHTML = latestExecutions.map(item => {
+            const status = ['running', 'completed', 'failed', 'denied'].includes(item.status)
+                ? item.status : 'unknown';
+            const provider = ['local', 'cloud'].includes(item.provider)
+                ? item.provider : 'unknown';
+            const resultText = item.result == null
+                ? (status === 'running' ? 'Tool is still running...' : 'No result recorded.')
+                : (typeof item.result === 'string'
+                    ? item.result : JSON.stringify(item.result));
+            const preview = resultText.length > 240
+                ? resultText.slice(0, 240) + '…' : resultText;
+            const latency = item.latency_ms == null
+                ? '—' : `${Number(item.latency_ms).toFixed(1)} ms`;
+            const timestamp = formatExecutionTime(item.timestamp);
+            const open = status === 'running' ? ' open' : '';
+
+            return `
+                <details class="execution-card status-${status}"${open}>
+                    <summary>
+                        <span class="execution-state-dot ${status}"></span>
+                        <span class="execution-name">${escapeHtml(item.name || 'unknown tool')}</span>
+                        <span class="execution-provider ${provider}">${provider.toUpperCase()}</span>
+                        <span class="execution-status ${status}">${status.toUpperCase()}</span>
+                        <span class="execution-meta">${escapeHtml(timestamp)} · ${escapeHtml(latency)}</span>
+                    </summary>
+                    <div class="execution-card-body">
+                        <p class="execution-result">${escapeHtml(preview)}</p>
+                        <button class="btn btn-secondary btn-sm"
+                            type="button" data-inspect-id="${escapeHtml(item.id)}">
+                            Inspect JSON
+                        </button>
+                    </div>
+                </details>
+            `;
+        }).join('');
+    }
+
+    function formatExecutionTime(value) {
+        if (!value) return 'Time unavailable';
+        const date = new Date(value);
+        return Number.isNaN(date.getTime()) ? 'Time unavailable'
+            : date.toLocaleString();
+    }
+
+    function openExecutionInspector(executionId) {
+        const item = latestExecutions.find(entry => entry.id === executionId);
+        if (!item || !executionInspector) return;
+        document.getElementById('execution-inspector-meta').textContent =
+            `${item.name} · ${String(item.status).toUpperCase()} · ${formatExecutionTime(item.timestamp)} · ${item.latency_ms == null ? 'running' : Number(item.latency_ms).toFixed(1) + ' ms'} · ${String(item.provider || 'unknown').toUpperCase()}`;
+        document.getElementById('execution-inspector-arguments').textContent =
+            JSON.stringify(item.arguments, null, 2) ?? 'null';
+        document.getElementById('execution-inspector-result').textContent =
+            JSON.stringify(item.result, null, 2) ?? 'null';
+        if (!executionInspector.open) executionInspector.showModal();
+    }
+
+    executionList?.addEventListener('click', event => {
+        const button = event.target.closest('[data-inspect-id]');
+        if (button) openExecutionInspector(button.dataset.inspectId);
+    });
+
+    document.getElementById('execution-inspector-close')?.addEventListener('click', () => {
+        executionInspector?.close();
+    });
+
+    executionInspector?.addEventListener('click', event => {
+        if (event.target === executionInspector) executionInspector.close();
+    });
 
     // ==========================================
     // Chat (Shared WarmBrain)
@@ -315,7 +431,12 @@
         if (currentPage === 'home') refreshStatus();
     }, 4000);
 
+    executionInterval = setInterval(() => {
+        if (currentPage === 'home') refreshExecutions();
+    }, 2000);
+
     // Initial triggers
     refreshStatus();
+    refreshExecutions();
     syncChatHistory();
 })();

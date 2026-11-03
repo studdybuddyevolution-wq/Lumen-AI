@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import tempfile
 import time
 import unittest
@@ -76,6 +77,12 @@ class ToolRegistryTests(unittest.TestCase):
         with self.assertRaisesRegex(ToolValidationError, "text"):
             self.registry.execute("needs_text", {"text": 123})
 
+    def _approve(self, feature: Path) -> None:
+        feature.with_suffix(".approved").write_text(
+            hashlib.sha256(feature.read_bytes()).hexdigest(),
+            encoding="ascii",
+        )
+
     def test_feature_reload_replaces_handler_and_deleted_file_unregisters(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             feature_dir = Path(temp) / "features"
@@ -91,7 +98,7 @@ class ToolRegistryTests(unittest.TestCase):
                 "def run():\n    return 'first'\n",
                 encoding="utf-8",
             )
-
+            self._approve(feature)
             self.registry.load_features(feature_dir)
             self.assertEqual(self.registry.execute("reload_test", {}), "first")
 
@@ -101,8 +108,11 @@ class ToolRegistryTests(unittest.TestCase):
                 "def run():\n    return 'second version'\n",
                 encoding="utf-8",
             )
-            # Ensure a distinct mtime on filesystems with coarse timestamp resolution.
             time.sleep(0.02)
+            self.registry.load_features(feature_dir)
+            self.assertEqual(self.registry.execute("reload_test", {}), "first")
+
+            self._approve(feature)
             self.registry.load_features(feature_dir)
             self.assertEqual(
                 self.registry.execute("reload_test", {}),

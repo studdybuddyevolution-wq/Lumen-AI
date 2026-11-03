@@ -141,9 +141,12 @@ def _run_powershell(args: dict[str, Any]) -> str:
     if len(command) > 12000:
         raise ValueError("PowerShell command exceeds the 12,000-character safety limit.")
     blocked = re.compile(
-        r"(?i)(\bRemove-Item\b|\bFormat-Volume\b|\bClear-Disk\b|\bInitialize-Disk\b|"
+        r"(?i)(\bRemove-Item\b|\bRemove-ItemProperty\b|\b(?:del|erase|rd|rmdir|rm)\b|"
+        r"\bFormat-(?:Volume|Partition|Disk)\b|\bClear-Disk\b|\bInitialize-Disk\b|"
         r"\bdiskpart\b|\bStop-Computer\b|\bRestart-Computer\b|\bSet-ExecutionPolicy\b|"
-        r"\breg\s+delete\b|\bbcdedit\b|\bClear-RecycleBin\b|\bshutdown\s+/(s|r)\b|"
+        r"\breg\s+(?:add|delete)\b|\bbcdedit\b|\bClear-RecycleBin\b|\bshutdown\s+/(s|r)\b|"
+        r"\b(?:Set|Add|Remove)-MpPreference\b|\b(?:Set|Stop)-Service\b|"
+        r"\bsc(?:\.exe)?\s+config\b|\bnet\s+stop\b|\btakeown\b|\bicacls\b.*\/(?:grant|reset)\b|"
         r"\bwinget\s+install\b|\bchoco\s+install\b|\bscoop\s+install\b|"
         r"\bInstall-Module\b|\bAdd-AppxPackage\b|\bmsiexec\s+/(i|package)\b)"
     )

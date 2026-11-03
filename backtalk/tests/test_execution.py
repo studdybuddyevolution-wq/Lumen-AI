@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import asyncio
 import unittest
 
+from backtalk.brain import WarmBrain
 from backtalk.execution import ExecutionTracker
+from backtalk.registry import ToolValidationError
 
 
 class ExecutionTrackerTests(unittest.TestCase):
@@ -55,6 +58,66 @@ class ExecutionTrackerTests(unittest.TestCase):
 
         with self.assertRaisesRegex(ValueError, "status must be one of"):
             tracker.finish(execution_id, "pending", "not terminal")
+
+
+class _StubRegistry:
+    def __init__(self, *, known: bool = True, result: str = "ok", error=None):
+        self.known = known
+        self.result = result
+        self.error = error
+
+    def get(self, name):
+        return object() if self.known else None
+
+    def execute(self, name, arguments):
+        if self.error is not None:
+            raise self.error
+        return self.result
+
+
+class ToolExecutionIntegrationTests(unittest.IsolatedAsyncioTestCase):
+    def setUp(self) -> None:
+        self.brain = WarmBrain.__new__(WarmBrain)
+        self.brain.execution_tracker = ExecutionTracker()
+        self.brain._registry = _StubRegistry()
+
+    async def test_success_records_completed_call(self) -> None:
+        result = await self.brain._run_tool({
+            "function": {"name": "sample_tool", "arguments": {"value": 7}}
+        })
+        event = self.brain.execution_tracker.recent(1)[0]
+        self.assertEqual(result, "ok")
+        self.assertEqual(event["name"], "sample_tool")
+        self.assertEqual(event["args"], {"value": 7})
+        self.assertEqual(event["status"], "completed")
+        self.assertEqual(event["result"], "ok")
+
+    async def test_unknown_tool_is_recorded_as_denied(self) -> None:
+        self.brain._registry = _StubRegistry(known=False)
+        result = await self.brain._run_tool({
+            "function": {"name": "missing_tool", "arguments": {}}
+        })
+        event = self.brain.execution_tracker.recent(1)[0]
+        self.assertIn("not available", result)
+        self.assertEqual(event["status"], "denied")
+
+    async def test_invalid_arguments_are_recorded_as_denied(self) -> None:
+        self.brain._registry = _StubRegistry(error=ToolValidationError("value is invalid"))
+        result = await self.brain._run_tool({
+            "function": {"name": "sample_tool", "arguments": {"value": 7}}
+        })
+        event = self.brain.execution_tracker.recent(1)[0]
+        self.assertIn("Tool rejected", result)
+        self.assertEqual(event["status"], "denied")
+
+    async def test_handler_exception_is_recorded_as_failed(self) -> None:
+        self.brain._registry = _StubRegistry(error=RuntimeError("simulated failure"))
+        result = await self.brain._run_tool({
+            "function": {"name": "sample_tool", "arguments": {}}
+        })
+        event = self.brain.execution_tracker.recent(1)[0]
+        self.assertIn("simulated failure", result)
+        self.assertEqual(event["status"], "failed")
 
 
 if __name__ == "__main__":

@@ -108,6 +108,35 @@ class BugHunterTests(unittest.TestCase):
         self.assertIsNone(report.primary_file)
         self.assertEqual(report.frames, ())
 
+    def test_parent_directory_segments_are_rejected(self) -> None:
+        traversal = self.root / ".." / self.root.name / "sample.py"
+        report = self.hunter.capture_traceback(self.make_traceback(path=traversal))
+
+        self.assertIsNone(report.primary_file)
+        self.assertEqual(report.frames, ())
+
+    def test_multiline_private_key_is_redacted_without_shifting_source_lines(self) -> None:
+        self.source.write_text(
+            "def fail_now():\n"
+            "    key = \"\"\"-----BEGIN PRIVATE KEY-----\n"
+            "PRIVATE-MATERIAL-MUST-NOT-LEAK\n"
+            "-----END PRIVATE KEY-----\"\"\"\n"
+            "    raise RuntimeError('failed')\n"
+            "fail_now()\n",
+            encoding="utf-8",
+        )
+        report = self.hunter.capture_traceback(
+            self.make_traceback(line=4, function="fail_now"),
+            exception_type="RuntimeError",
+            message="failed",
+        )
+
+        context = "\n".join(report.source_context)
+        self.assertNotIn("PRIVATE-MATERIAL-MUST-NOT-LEAK", context)
+        self.assertEqual(report.primary_line, 4)
+        self.assertIn("[private-key-redacted]", context)
+        self.assertIn("raise RuntimeError", context)
+
     def test_repeated_failures_are_deduplicated_and_counted(self) -> None:
         first = self.hunter.capture_traceback(self.make_traceback(message="failure 123"))
         second = self.hunter.capture_traceback(self.make_traceback(message="failure 456"))

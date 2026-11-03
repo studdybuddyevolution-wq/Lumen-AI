@@ -176,11 +176,23 @@ class ToolRegistry:
         return arguments
 
     def execute(self, name: str, arguments: dict[str, Any]) -> Any:
+        # Validate and invoke the same immutable definition snapshot so a
+        # concurrent hot reload cannot pair one schema with another handler.
         definition = self.get(name)
         if definition is None:
             raise ToolValidationError(f"Unknown tool: {name!r}.")
-        clean_arguments = self.validate_arguments(name, arguments)
-        result = definition.handler(**clean_arguments)
+        if not isinstance(arguments, dict):
+            raise ToolValidationError("Tool arguments must be a JSON object.")
+        validator = Draft202012Validator(definition.params_schema)
+        errors = sorted(
+            validator.iter_errors(arguments),
+            key=lambda error: tuple(str(part) for part in error.absolute_path),
+        )
+        if errors:
+            first = errors[0]
+            location = ".".join(str(part) for part in first.absolute_path) or "$"
+            raise ToolValidationError(f"{location}: {first.message}")
+        result = definition.handler(**arguments)
         if hasattr(result, "__await__"):
             raise TypeError("Tool handlers must be synchronous functions.")
         return result

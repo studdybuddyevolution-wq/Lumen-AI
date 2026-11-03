@@ -37,6 +37,7 @@ _PRIVATE_KEY_BLOCK_RE = re.compile(
     r"(?is)-----BEGIN [A-Z ]*PRIVATE KEY-----.*?-----END [A-Z ]*PRIVATE KEY-----"
 )
 _WINDOWS_USER_PATH_RE = re.compile(r"(?i)[A-Z]:\\Users\\[^\\\s]+")
+_POSIX_HOME_PATH_RE = re.compile(r"(?<![A-Za-z0-9])/(?:home|Users)/[^/\\s]+")
 _LONG_TOKEN_RE = re.compile(r"\b(?:sk-[A-Za-z0-9_-]{12,}|gh[pousr]_[A-Za-z0-9]{20,})\b")
 _HEX_ADDRESS_RE = re.compile(r"\b0x[0-9a-fA-F]{8,}\b")
 _UUID_RE = re.compile(
@@ -60,6 +61,7 @@ def redact_text(value: str, *, limit: int = _MAX_MESSAGE_CHARS) -> str:
     if _PRIVATE_KEY_BLOCK_RE.search(text):
         text = _PRIVATE_KEY_BLOCK_RE.sub("[private-key-redacted]", text)
     text = _WINDOWS_USER_PATH_RE.sub("%USERPROFILE%", text)
+    text = _POSIX_HOME_PATH_RE.sub("%HOME%", text)
     text = _SECRET_ASSIGNMENT_RE.sub(lambda match: match.group("key") + "=[redacted]", text)
     text = _BEARER_RE.sub("Bearer [redacted]", text)
     text = _LONG_TOKEN_RE.sub("[token-redacted]", text)
@@ -69,6 +71,12 @@ def redact_text(value: str, *, limit: int = _MAX_MESSAGE_CHARS) -> str:
     if len(text) > limit:
         text = text[:limit] + "…[truncated]"
     return text
+
+
+def _sanitise_source_lines(source: str) -> list[str]:
+    """Redact multiline private-key blocks before selecting individual lines."""
+    without_private_keys = _PRIVATE_KEY_BLOCK_RE.sub("[private-key-redacted]", source)
+    return [redact_text(line, limit=300) for line in without_private_keys.splitlines()]
 
 
 def _safe_component(value: str) -> str:
@@ -202,7 +210,7 @@ class BugHunter:
         path, relative = resolved
         try:
             source = path.read_text(encoding="utf-8", errors="replace")
-            lines = source.splitlines()
+            lines = _sanitise_source_lines(source)
         except (OSError, UnicodeError, ValueError, MemoryError):
             return relative, "", ()
 
@@ -221,10 +229,7 @@ class BugHunter:
         end = min(len(lines), lineno + 4)
         if end - start + 1 > _MAX_CONTEXT_LINES:
             end = start + _MAX_CONTEXT_LINES - 1
-        context = tuple(
-            redact_text(lines[index - 1], limit=300)
-            for index in range(start, end + 1)
-        )
+        context = tuple(lines[index - 1] for index in range(start, end + 1))
         return relative, symbol, context
 
     def capture_traceback(
@@ -271,9 +276,11 @@ class BugHunter:
                 continue
             path, relative = resolved
             try:
-                source_lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
+                source_lines = _sanitise_source_lines(
+                    path.read_text(encoding="utf-8", errors="replace")
+                )
                 source_line = (
-                    redact_text(source_lines[lineno - 1], limit=300)
+                    source_lines[lineno - 1]
                     if 0 < lineno <= len(source_lines)
                     else ""
                 )

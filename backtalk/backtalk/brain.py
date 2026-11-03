@@ -65,6 +65,16 @@ class WarmBrain:
         self._num_ctx = int(CFG.get("ollama_num_ctx") or 8192)
         self._max_tool_rounds = int(CFG.get("ollama_max_tool_rounds") or 6)
 
+    def _capture_bug(self, exc: BaseException, component: str) -> None:
+        """Keep diagnostics best-effort so capture failures never affect Lumen."""
+        try:
+            self.bug_hunter.capture_exception(exc, component=component)
+        except Exception as diagnostic_error:
+            log(
+                "[bug-hunter] capture failed: "
+                f"{type(diagnostic_error).__name__}"
+            )
+
     def _load_prompt(self) -> str:
         name = str(CFG.get("name") or "Lumen")
         parts = [
@@ -281,7 +291,7 @@ class WarmBrain:
             self.execution_tracker.finish(execution_id, "denied", message)
             return message
         except Exception as exc:
-            self.bug_hunter.capture_exception(exc, component=f"tool:{name}")
+            self._capture_bug(exc, component=f"tool:{name}")
             message = f"Tool error: {type(exc).__name__}: {exc}"
             log(f"[tools] {name} failed: {exc!r}")
             self.execution_tracker.finish(execution_id, "failed", message)
@@ -297,7 +307,7 @@ class WarmBrain:
             try:
                 await self.start()
             except Exception as exc:
-                self.bug_hunter.capture_exception(exc, component="ollama_start")
+                self._capture_bug(exc, component="ollama_start")
                 raise
         self._messages.append({"role": "user", "content": utterance})
         self._dirty = True
@@ -330,7 +340,7 @@ class WarmBrain:
         except asyncio.CancelledError:
             raise
         except Exception as exc:
-            self.bug_hunter.capture_exception(exc, component="ollama_chat")
+            self._capture_bug(exc, component="ollama_chat")
             log(f"[brain] Ollama request failed: {exc!r}")
             yield "I couldn't complete that request because the local Ollama model returned an error. Check the Backtalk log for details."
         finally:

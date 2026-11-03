@@ -11,8 +11,8 @@ from copy import deepcopy
 from datetime import datetime, timezone
 from threading import RLock
 from time import perf_counter
-from uuid import uuid4
 from typing import Any
+from uuid import uuid4
 
 _TERMINAL_STATUSES = frozenset({"completed", "failed", "denied"})
 
@@ -76,7 +76,9 @@ class ExecutionTracker:
             self._started_at[execution_id] = perf_counter()
         return execution_id
 
-    def finish(self, execution_id: str, status: str, result: Any) -> dict[str, Any] | None:
+    def finish(
+        self, execution_id: str, status: str, result: Any
+    ) -> dict[str, Any] | None:
         """Set the terminal state and result for a previously started call."""
         if status not in _TERMINAL_STATUSES:
             raise ValueError(
@@ -104,4 +106,7 @@ class ExecutionTracker:
         """Return newest-first event snapshots without exposing mutable state."""
         safe_limit = max(0, min(int(limit), self._max_events))
         with self._lock:
-            return [deepcopy(event) for event in list(self._events)[-safe_limit:]][::-1] if safe_limit else []
+            if not safe_limit:
+                return []
+            recent_events = list(self._events)[-safe_limit:]
+            return [deepcopy(event) for event in reversed(recent_events)]

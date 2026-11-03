@@ -271,8 +271,12 @@ failures increment one report instead of creating unbounded duplicates.
 ### Privacy and resource limits
 
 - Reports stay in memory and are capped at 100 unique fingerprints per runtime.
-- Raw tracebacks, local variables, call arguments, conversation contents and
-  full absolute paths are not stored in Bug Hunter reports.
+- Raw tracebacks, local variables, tool arguments, conversation history and
+  full absolute paths are not collected as separate fields.
+- Exception messages or source lines can themselves embed user-provided text;
+  these are subject to pattern-based redaction, so reports must still be
+  treated as potentially sensitive. Do not deliberately place private inputs
+  or credentials in exception messages or source code.
 - Messages and source excerpts are bounded and common API keys, passwords,
   bearer tokens, private-key blocks, token-like values and Windows user paths
   are redacted before records are returned.

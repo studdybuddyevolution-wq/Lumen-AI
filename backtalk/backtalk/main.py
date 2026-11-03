@@ -30,11 +30,10 @@ session itself so you never go back to the keyboard: "clear the
 session" / "compact the session" / "switch to the deep model" / "back
 to the fast model" / "set effort to low" (or medium, high, max) /
 "usage report" / "go hands free" and "push to talk mode" (the MIC) /
-"stop asking for permission" and "start asking again" (permissions,
-called auto-approve, a different axis than the microphone on purpose).
-And with permission_mode "ask" (the default), gated tool calls ASK OUT
-LOUD and your spoken yes or no decides them; any other answer is
-passed back to the agent as the reason.
+Routine requested desktop actions execute without a per-action prompt,
+inside Lumen's configured workspace, allowlist and protected-operation
+rules. Generated Python features and auto-heal patches have separate
+human review and approval steps.
 
 Flags:
   --open-mic   start in hands-free listening for this session (the
@@ -73,12 +72,8 @@ from backtalk.vlog import log
 NAME = CFG["name"]
 QUIT_PHRASES = CFG["quit_phrases"]
 
-# ---- THE SPOKEN PERMISSION GATE (permission_mode "ask", the default).
-# When the agent wants a gated tool, the SDK routes the decision here:
-# the ask is spoken, the turn pauses (the SDK waits indefinitely; the
-# timeout below is ours), and the NEXT utterance or typed line is the
-# answer. "yes" approves; anything else denies, with the user's own
-# words passed back as the reason. Silence means no.
+# Legacy permission-gate helpers remain import-compatible, but are not
+# passed to WarmBrain. Routine desktop actions use the registry directly.
 PERM_TIMEOUT_S = 75
 _PERM = {"fut": None, "asked_at": 0.0,   # pending ask + when it was posed
          "hinted": False, "pending": None}  # escape-hatch hint said yet?
@@ -96,7 +91,6 @@ _INTERRUPT_ANSWER = "\x00interrupt"      # sentinel: turn is being killed
 # SDK routes here. (Auto-approve is about PERMISSIONS; hands-free
 # LISTENING is about the microphone: see _MIC below. Two different
 # axes, deliberately never sharing a name.)
-_AUTOAPPROVE = {"on": False}
 # The microphone mode, switchable live by voice. "ptt" = mic closed
 # except while the key is held. "open" = hands-free listening (VAD).
 # The key keeps working in open mode: it interrupts, and holding it

@@ -177,7 +177,12 @@ def _get_status() -> dict[str, Any]:
     turns = _brain.session.get("turns", 0) if _brain is not None else 0
     registry = getattr(_brain, "_registry", None) if _brain is not None else None
     tools = registry.list_tools() if registry is not None else []
-    feature_sources = {item.source for item in tools if item.source != "builtin"}
+    feature_sources = {
+        item.source.replace("\\", "/")
+        for item in tools
+        if item.source != "builtin"
+        and not item.source.replace("\\", "/").endswith("/features/core_tools.py")
+    }
 
     return {
         "status": "online",

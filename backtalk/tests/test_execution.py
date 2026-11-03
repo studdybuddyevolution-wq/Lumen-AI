@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import asyncio
 import unittest
+from types import SimpleNamespace
 
+from backtalk import bridge
 from backtalk.brain import WarmBrain
 from backtalk.execution import ExecutionTracker
 from backtalk.registry import ToolValidationError
@@ -58,6 +60,12 @@ class ExecutionTrackerTests(unittest.TestCase):
 
         with self.assertRaisesRegex(ValueError, "status must be one of"):
             tracker.finish(execution_id, "pending", "not terminal")
+
+
+    def test_cloud_provider_is_preserved_for_dashboard_badge(self) -> None:
+        tracker = ExecutionTracker()
+        tracker.start("future_cloud_action", {}, provider="cloud")
+        self.assertEqual(tracker.recent(1)[0]["provider"], "cloud")
 
 
 class _StubRegistry:
@@ -118,6 +126,28 @@ class ToolExecutionIntegrationTests(unittest.IsolatedAsyncioTestCase):
         event = self.brain.execution_tracker.recent(1)[0]
         self.assertIn("simulated failure", result)
         self.assertEqual(event["status"], "failed")
+
+
+class ExecutionBridgeTests(unittest.TestCase):
+    def test_bridge_returns_recent_events_and_status_counts(self) -> None:
+        tracker = ExecutionTracker()
+        completed_id = tracker.start("read_file", {"path": "notes.md"})
+        tracker.finish(completed_id, "completed", "contents")
+        denied_id = tracker.start("blocked_action", {})
+        tracker.finish(denied_id, "denied", "blocked")
+
+        original_brain = bridge._brain
+        bridge._brain = SimpleNamespace(execution_tracker=tracker)
+        try:
+            payload = bridge._get_executions(10)
+        finally:
+            bridge._brain = original_brain
+
+        self.assertEqual(payload["count"], 2)
+        self.assertEqual(payload["counts"]["completed"], 1)
+        self.assertEqual(payload["counts"]["denied"], 1)
+        self.assertEqual(payload["events"][0]["id"], denied_id)
+        self.assertEqual(payload["events"][1]["id"], completed_id)
 
 
 if __name__ == "__main__":

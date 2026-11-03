@@ -6,6 +6,7 @@ import time
 import unittest
 from pathlib import Path
 
+from backtalk.selfdev.sandbox import SandboxCheckResult, SandboxReceipt
 from backtalk.registry import (
     ToolRegistry,
     ToolRegistrationError,
@@ -93,17 +94,24 @@ class ToolRegistryTests(unittest.TestCase):
 
     def _verify_and_approve(self, feature: Path) -> None:
         digest = hashlib.sha256(feature.read_bytes()).hexdigest()
-        receipt = {
-            "receipt_id": "unit-test-receipt",
-            "passed": True,
-            "subject_sha256": digest,
-            "source_sha256": "test-workspace-digest",
-            "snapshot_sha256": "test-snapshot-digest",
-            "checks": [{"name": "unittest", "passed": True}],
-            "finished_at": "2026-11-03T00:00:00+00:00",
-            "isolation": "test-fixture",
-            "security_boundary": False,
-        }
+        receipt = SandboxReceipt(
+            receipt_id="unit-test-receipt",
+            source_sha256="test-workspace-digest",
+            snapshot_sha256="test-snapshot-digest",
+            subject_path=feature.name,
+            subject_sha256=digest,
+            passed=True,
+            checks=(
+                SandboxCheckResult("compileall", True, 0, False, 1, "", ""),
+                SandboxCheckResult("unittest", True, 0, False, 1, "", ""),
+            ),
+            started_at="2026-11-03T00:00:00+00:00",
+            finished_at="2026-11-03T00:00:01+00:00",
+            duration_ms=1,
+            isolation="test-fixture",
+            security_boundary=False,
+            warnings=(),
+        )
         record_feature_verification(feature, receipt)
         approve_feature_module(feature)
 
@@ -115,17 +123,37 @@ class ToolRegistryTests(unittest.TestCase):
                 approve_feature_module(feature)
 
             digest = hashlib.sha256(feature.read_bytes()).hexdigest()
-            failed = {"receipt_id": "failed", "passed": False, "subject_sha256": digest}
+            failed = SandboxReceipt(
+                receipt_id="failed", source_sha256="x", snapshot_sha256="y",
+                subject_path="sample.py", subject_sha256=digest, passed=False,
+                checks=(), started_at="now", finished_at="now", duration_ms=0,
+                isolation="test-fixture", security_boundary=False, warnings=(),
+            )
             with self.assertRaisesRegex(ValueError, "passing sandbox receipt"):
                 record_feature_verification(feature, failed)
 
-            passed = {
-                "receipt_id": "passed",
-                "passed": True,
-                "subject_sha256": "wrong-digest",
-            }
+            incomplete = SandboxReceipt(
+                receipt_id="incomplete", source_sha256="x", snapshot_sha256="y",
+                subject_path="sample.py", subject_sha256=digest, passed=True,
+                checks=(SandboxCheckResult("compileall", True, 0, False, 1, "", ""),),
+                started_at="now", finished_at="now", duration_ms=0,
+                isolation="test-fixture", security_boundary=False, warnings=(),
+            )
+            with self.assertRaisesRegex(ValueError, "compileall and unittest"):
+                record_feature_verification(feature, incomplete)
+
+            mismatched = SandboxReceipt(
+                receipt_id="mismatched", source_sha256="x", snapshot_sha256="y",
+                subject_path="sample.py", subject_sha256="wrong-digest", passed=True,
+                checks=(
+                    SandboxCheckResult("compileall", True, 0, False, 1, "", ""),
+                    SandboxCheckResult("unittest", True, 0, False, 1, "", ""),
+                ),
+                started_at="now", finished_at="now", duration_ms=0,
+                isolation="test-fixture", security_boundary=False, warnings=(),
+            )
             with self.assertRaisesRegex(ValueError, "does not match"):
-                record_feature_verification(feature, passed)
+                record_feature_verification(feature, mismatched)
 
     def test_approved_feature_without_verified_receipt_is_not_loaded(self) -> None:
         with tempfile.TemporaryDirectory() as temp:

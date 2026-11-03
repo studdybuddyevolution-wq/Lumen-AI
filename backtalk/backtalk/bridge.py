@@ -284,9 +284,22 @@ def _get_bugs(limit: int = 50) -> dict[str, Any]:
             "reports": [],
         }
     try:
-        return hunter.summary(max(0, min(int(limit), 100)))
+        payload = hunter.summary(max(0, min(int(limit), 100)))
     except (TypeError, ValueError):
-        return hunter.summary(50)
+        payload = hunter.summary(50)
+
+    # Keep source excerpts inside the runtime process. The localhost HTTP
+    # endpoint exposes locations and AST symbols, not snippets of local code.
+    for report in payload.get("reports", []):
+        report.pop("source_context", None)
+        report["frames"] = [
+            {
+                key: frame.get(key)
+                for key in ("file", "line", "function")
+            }
+            for frame in report.get("frames", [])
+        ]
+    return payload
 
 
 def _get_approval() -> dict[str, Any]:

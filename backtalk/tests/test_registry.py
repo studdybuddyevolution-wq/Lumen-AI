@@ -100,10 +100,14 @@ class ToolRegistryTests(unittest.TestCase):
             feature_dir = Path(temp) / "features"
             feature_dir.mkdir()
             feature = feature_dir / "sample_feature.py"
-            schema = (
-                '{"type": "object", "properties": {}, '
-                '"additionalProperties": false}'
-            )
+            # The feature file is Python source, so build a Python dict
+            # representation rather than inserting raw JSON (JSON uses
+            # lowercase true/false/null, which are not Python literals).
+            schema = repr({
+                "type": "object",
+                "properties": {},
+                "additionalProperties": False,
+            })
             feature.write_text(
                 "from backtalk.registry import tool\n"
                 f"@tool('reload_test', 'Reload test tool', {schema}, False)\n"

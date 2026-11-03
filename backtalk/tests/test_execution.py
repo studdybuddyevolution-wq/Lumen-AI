@@ -77,6 +77,10 @@ class _StubRegistry:
     def get(self, name):
         return object() if self.known else None
 
+    def validate_arguments(self, name, arguments):
+        if isinstance(self.error, ToolValidationError):
+            raise self.error
+
     def execute(self, name, arguments):
         if self.error is not None:
             raise self.error

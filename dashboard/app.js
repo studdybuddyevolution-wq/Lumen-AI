@@ -167,7 +167,7 @@
         document.getElementById('execution-inspector-meta').textContent =
             `${item.name} · ${String(item.status).toUpperCase()} · ${formatExecutionTime(item.timestamp)} · ${item.latency_ms == null ? 'running' : Number(item.latency_ms).toFixed(1) + ' ms'} · ${String(item.provider || 'unknown').toUpperCase()}`;
         document.getElementById('execution-inspector-arguments').textContent =
-            JSON.stringify(item.arguments, null, 2) ?? 'null';
+            JSON.stringify(item.args, null, 2) ?? 'null';
         document.getElementById('execution-inspector-result').textContent =
             JSON.stringify(item.result, null, 2) ?? 'null';
         if (!executionInspector.open) executionInspector.showModal();

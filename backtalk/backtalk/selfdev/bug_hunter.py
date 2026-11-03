@@ -25,10 +25,11 @@ _EXCEPTION_RE = re.compile(
 )
 _SECRET_ASSIGNMENT_RE = re.compile(
     r"""(?ix)
-    \b(api[_-]?key|access[_-]?token|refresh[_-]?token|auth[_-]?token|
+    \b(?P<key>api[_-]?key|access[_-]?token|refresh[_-]?token|auth[_-]?token|
        password|passwd|secret|client[_-]?secret|authorization)
     \b\s*[:=]\s*
-    (?:["']?)[^\s,;}\]]+
+    (?:(?:Bearer|Basic)\s+)?
+    (?:["'][^"']*["']|[^\s,;}\]]+)
     """
 )
 _BEARER_RE = re.compile(r"(?i)\bBearer\s+[A-Za-z0-9._~+/-]+=*")
@@ -59,7 +60,7 @@ def redact_text(value: str, *, limit: int = _MAX_MESSAGE_CHARS) -> str:
     if _PRIVATE_KEY_BLOCK_RE.search(text):
         text = _PRIVATE_KEY_BLOCK_RE.sub("[private-key-redacted]", text)
     text = _WINDOWS_USER_PATH_RE.sub("%USERPROFILE%", text)
-    text = _SECRET_ASSIGNMENT_RE.sub(lambda match: match.group(0).split("=")[0].split(":")[0] + "=[redacted]", text)
+    text = _SECRET_ASSIGNMENT_RE.sub(lambda match: match.group("key") + "=[redacted]", text)
     text = _BEARER_RE.sub("Bearer [redacted]", text)
     text = _LONG_TOKEN_RE.sub("[token-redacted]", text)
     text = _HEX_ADDRESS_RE.sub("0x[redacted-address]", text)

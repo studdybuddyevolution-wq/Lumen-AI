@@ -20,7 +20,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
 
-from jsonschema import Draft202012Validator, SchemaError, SchemaError as _UnusedSchemaError
+from jsonschema import Draft202012Validator
 
 LOGGER = logging.getLogger("lumen.registry")
 _TOOL_NAME = re.compile(r"^[a-zA-Z][a-zA-Z0-9_]{0,63}$")
@@ -247,6 +247,7 @@ class ToolRegistry:
         except Exception:
             if module is not None:
                 sys.modules.pop(module_name, None)
+            self.unregister_source(source)
             with self._lock:
                 for name, definition in previous.items():
                     self._tools[name] = definition

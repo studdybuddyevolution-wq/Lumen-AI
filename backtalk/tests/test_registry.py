@@ -15,6 +15,18 @@ from backtalk.registry import (
 
 
 class ToolRegistryTests(unittest.TestCase):
+    def test_existing_tools_register_through_builtin_adapter(self) -> None:
+        from backtalk.features import core_tools  # noqa: F401
+        from backtalk.registry import DEFAULT_REGISTRY
+        from backtalk.tools import TOOL_DEFINITIONS
+
+        registered = {item.name for item in DEFAULT_REGISTRY.list_tools()}
+        expected = {
+            item["function"]["name"] for item in TOOL_DEFINITIONS
+        }
+        self.assertTrue(expected.issubset(registered))
+        self.assertEqual(len(expected), len(TOOL_DEFINITIONS))
+
     def setUp(self) -> None:
         self.registry = ToolRegistry()
 

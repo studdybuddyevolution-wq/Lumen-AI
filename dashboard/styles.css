@@ -572,7 +572,7 @@ body {
 
 .execution-card summary {
     display: grid;
-    grid-template-columns: 10px minmax(120px, 1fr) auto auto auto;
+    grid-template-columns: 10px minmax(120px, 1fr) auto auto auto 10px;
     align-items: center;
     gap: 12px;
     min-height: 48px;
@@ -758,18 +758,20 @@ body {
 
 @media (max-width: 760px) {
     .execution-card summary {
-        grid-template-columns: 10px minmax(80px, 1fr) auto;
+        grid-template-columns: 10px minmax(80px, 1fr) auto auto;
         gap: 8px;
     }
 
     .execution-card summary .execution-meta {
         grid-column: 2 / -1;
+        grid-row: 2;
         white-space: normal;
     }
 
     .execution-card summary::after {
-        grid-column: 3;
-        grid-row: 1;
+        grid-column: 1;
+        grid-row: 2;
+        justify-self: start;
     }
 
     .execution-panel-header {

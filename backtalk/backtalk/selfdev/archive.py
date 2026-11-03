@@ -16,7 +16,7 @@ import re
 import threading
 import time
 import uuid
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
 from typing import Any, Mapping
@@ -169,6 +169,7 @@ class CandidateRecord:
     improvement_summary: str
     suite_version: str
     created_at: str
+    metadata: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         result = asdict(self)
@@ -338,6 +339,8 @@ class CandidateArchive:
         parent_candidate_id: str | None = None,
         source_commit: str | None = None,
         changed_files: tuple[str, ...] | list[str] = (),
+        metadata: Mapping[str, Any] | None = None,
+        candidate_id: str | None = None,
     ) -> CandidateRecord:
         """Append a candidate manifest bound to the current filtered tree digest."""
         source_root = Path(source_dir).expanduser().resolve()
@@ -378,6 +381,28 @@ class CandidateArchive:
         if len(safe_files) > 500 or len(set(safe_files)) != len(safe_files):
             raise ArchiveError("changed_files must contain at most 500 unique project-relative paths.")
 
+        if metadata is None:
+            safe_metadata: dict[str, Any] = {}
+        else:
+            if not isinstance(metadata, Mapping):
+                raise ArchiveError("metadata must be a JSON-compatible mapping.")
+            try:
+                encoded_metadata = json.dumps(
+                    dict(metadata), ensure_ascii=False, allow_nan=False, sort_keys=True
+                )
+                if len(encoded_metadata.encode("utf-8")) > 250_000:
+                    raise ArchiveError("Candidate metadata exceeds the 250 KiB limit.")
+                safe_metadata = json.loads(encoded_metadata)
+            except (TypeError, ValueError) as exc:
+                if isinstance(exc, ArchiveError):
+                    raise
+                raise ArchiveError("Candidate metadata must contain finite JSON values only.") from exc
+
+        if candidate_id is None:
+            candidate_id = uuid.uuid4().hex
+        elif not isinstance(candidate_id, str) or not _ID_PATTERN.fullmatch(candidate_id):
+            raise ArchiveError("candidate_id must be a 32-character hexadecimal ID.")
+
         if parent_candidate_id is not None:
             parent = self.get_candidate(parent_candidate_id)
             parent_decision = self.latest_decision(parent.candidate_id)
@@ -396,7 +421,7 @@ class CandidateArchive:
             raise ArchiveError(f"Could not digest candidate source: {exc}") from exc
 
         record = CandidateRecord(
-            candidate_id=uuid.uuid4().hex,
+            candidate_id=candidate_id,
             parent_candidate_id=parent_candidate_id,
             source_branch=source_branch,
             source_commit=source_commit.lower() if source_commit else None,
@@ -405,6 +430,7 @@ class CandidateArchive:
             improvement_summary=improvement_summary.strip(),
             suite_version=suite_version.strip(),
             created_at=_now(),
+            metadata=safe_metadata,
         )
         with self._lock:
             self._write_immutable("candidates", record.candidate_id, record.to_dict())

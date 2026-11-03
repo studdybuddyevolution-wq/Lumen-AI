@@ -158,20 +158,20 @@ Lumen must evaluate its own real tasks.
 ## Phase 4: candidate archive and evaluation controller
 
 The first archive implementation is available in
-\`backtalk.selfdev.archive\`.
+`backtalk.selfdev.archive`.
 
 ### Candidate and evaluation records
 
-\`CandidateArchive\` stores one JSON record per candidate, evaluation, and
+`CandidateArchive` stores one JSON record per candidate, evaluation, and
 review decision under the selected archive directory:
 
-- \`candidates/\`: immutable candidate manifest containing candidate ID,
+- `candidates/`: immutable candidate manifest containing candidate ID,
   parent ID, source branch/commit, filtered source-tree SHA-256, changed-file
   list, one-improvement summary, suite version and creation time.
-- \`evaluations/\`: immutable evaluation result containing sandbox receipt IDs,
+- `evaluations/`: immutable evaluation result containing sandbox receipt IDs,
   per-check pass/fail summaries, benchmark metrics, safety-gate results,
   environment metadata, duration and failure stage.
-- \`decisions/\`: immutable retain/reject/promote decisions and their rationale.
+- `decisions/`: immutable retain/reject/promote decisions and their rationale.
   A later decision appends a new record instead of rewriting earlier history.
 
 The archive directory must be outside the candidate source tree. The API does
@@ -185,38 +185,38 @@ worktrees. It also does not generate candidate patches or activate features.
 
 ### Staged evaluation
 
-\`CandidateEvaluationController.evaluate(...)\` first checks that the current
+`CandidateEvaluationController.evaluate(...)` first checks that the current
 filtered source-tree digest still matches the candidate manifest. It then:
 
-1. Runs a \`compileall\` smoke check against a disposable project copy.
-2. Only when that passes, runs \`compileall\` plus the complete standard-library
-   \`unittest\` discovery suite against another disposable copy.
+1. Runs a `compileall` smoke check against a disposable project copy.
+2. Only when that passes, runs `compileall` plus the complete standard-library
+   `unittest` discovery suite against another disposable copy.
 3. Re-checks the source digest and records a failed evaluation if the source
    changed during the process.
 4. Records compact check summaries and receipt IDs, not test logs.
 
 To pass evaluation, both stages must pass, benchmark metrics must be supplied,
-and the safety result must report \`security_policy_passed=true\`,
-\`policy_regressions=0\`, and all named safety checks passing.
+and the safety result must report `security_policy_passed=true`,
+`policy_regressions=0`, and all named safety checks passing.
 
 The current required benchmark dimensions are kept separate:
-\`task_success_rate\`, \`tool_routing_accuracy\`, \`schema_validity_rate\`, and
-\`median_latency_ms\`. Additional numeric metrics can be recorded. There is no
+`task_success_rate`, `tool_routing_accuracy`, `schema_validity_rate`, and
+`median_latency_ms`. Additional numeric metrics can be recorded. There is no
 capability benchmark harness in this phase: a trusted evaluator must supply
 these values. The controller deliberately does not invent scores or treat
 passing unit tests as evidence of improved task performance.
 
 ### Parent selection and promotion
 
-\`CandidateArchive.select_parent(seed=...)\` considers only candidates whose
-latest decision is \`retain\` or \`promote\`, whose latest evaluation passed,
+`CandidateArchive.select_parent(seed=...)` considers only candidates whose
+latest decision is `retain` or `promote`, whose latest evaluation passed,
 and whose safety results pass. It computes a Pareto front across the four
 separate capability dimensions, then gives less-used lineages a higher chance
 of selection. Safety results are hard eligibility gates, never a score that
 can be traded against capability gains.
 
-A candidate can be retained only after a passing evaluation. A \`promote\`
-decision requires \`human_approved=True\`; it is still only an archive decision
+A candidate can be retained only after a passing evaluation. A `promote`
+decision requires `human_approved=True`; it is still only an archive decision
 and does not install code, load a feature module, or change the active checkout.
 The existing verification receipt and explicit feature-approval gates remain
 mandatory for dynamic feature activation.
@@ -238,11 +238,11 @@ mandatory for dynamic feature activation.
 ## Phase 5: Bug Hunter diagnostics
 
 The first Bug Hunter implementation is available in
-\`backtalk.selfdev.bug_hunter\`.
+`backtalk.selfdev.bug_hunter`.
 
 ### Runtime capture
 
-A \`BugHunter\` instance is attached to \`WarmBrain\`. It captures unexpected
+A `BugHunter` instance is attached to `WarmBrain`. It captures unexpected
 exceptions at these boundaries:
 
 - Tool handler failures after schema validation.
@@ -283,7 +283,7 @@ failures increment one report instead of creating unbounded duplicates.
 - Only source files inside the configured project root are inspected; resolved
   paths are checked for project containment and symlink traversal.
 - The localhost bridge exposes read-only summaries at
-  \`GET /bridge/bugs?limit=50\`. Reports are newest-first and the limit is capped
+  `GET /bridge/bugs?limit=50`. Reports are newest-first and the limit is capped
   at 100. The HTTP response includes exception summaries, file/function/line
   locations and AST symbols, but omits source excerpts and source-line text.
 
@@ -301,3 +301,169 @@ failures increment one report instead of creating unbounded duplicates.
 - Redaction uses conservative pattern matching and cannot guarantee detection
   of every secret format. Do not deliberately place credentials in exception
   messages or source files.
+
+
+## Phase 6: Skill Forge
+
+The first Skill Forge implementation is available in
+`backtalk.selfdev.skill_forge`. It prepares proposed pure-Python tools in
+dedicated Git worktrees and returns source-bound review packets. It does not
+install or activate generated modules.
+
+### Candidate lifecycle
+
+1. Construct a `SkillSpecification` with a unique candidate ID, tool name,
+   purpose, entry point, input/output JSON Schemas, requested permissions,
+   optional filesystem scope, network/dependency requirements, expected
+   behavior, failure modes and proposed tests.
+2. `OllamaSkillGenerator` sends only that specification to an HTTP loopback
+   Ollama endpoint. It defaults to `qwen3.5:4b`, disables environment proxy
+   inheritance, and does not receive conversation history, vault contents,
+   credentials or unrelated files. Cloud generation is not implemented.
+3. The generator returns exactly one source file and one unittest file.
+   Neither is imported or executed by Skill Forge.
+4. `GitWorktreeManager` creates a branch named
+   `skillforge/<candidate-id>` and a separate worktree outside the main
+   checkout. By default the worktree root is a sibling directory named
+   `.<repository-name>-skill-worktrees`. Creation requires the main checkout
+   to be clean, including untracked files. Candidate files are created with
+   exclusive writes; existing branches/files are not overwritten.
+5. `StaticSkillValidator` parses Python ASTs, compiles syntax to code objects
+   without executing them, checks imports, entry-point registration, literal
+   schema/description, non-mutating registration, module/class side effects,
+   function defaults and annotations, and denies permissions, direct
+   filesystem scope, network access and third-party dependencies.
+6. The candidate source digest, changed-file list, base commit, branch,
+   candidate-relative worktree reference, specification, generator identifier
+   and static findings are appended to `CandidateArchive` metadata. The
+   archive's metadata field is optional so Phase 4 records remain readable.
+7. `SkillForge.review_candidate(candidate_id)` returns a
+   `SkillReviewPacket` containing the exact source and test files, source
+   digest, requested permissions, static findings, runtime status and current
+   review status. It refuses to return a packet when the candidate tree has
+   drifted from its archived digest.
+8. `record_human_review(...)` appends a digest-bound `approved` or
+   `rejected` review. A rejected candidate cannot be approved through stale
+   source evidence.
+9. `approve_installation(...)` can record a separate installation-approval
+   record only after a current approved review, explicit human confirmation,
+   exact source digest and a recorded passing receipt from a restricted
+   execution backend. This record is metadata only: no installer or runtime
+   loader is called.
+
+### Example: prepare a local candidate
+
+Run from the Backtalk project directory after installing the project's
+existing dependencies and starting local Ollama. Keep the evolution archive
+outside the repository so it does not dirty the main checkout.
+
+```python
+from pathlib import Path
+
+from backtalk.selfdev.archive import CandidateArchive
+from backtalk.selfdev.skill_forge import SkillForge, SkillSpecification
+
+repository_root = Path.cwd().parent
+archive = CandidateArchive(Path.home() / ".lumen" / "evolution-archive")
+forge = SkillForge(repository_root, archive)
+
+specification = SkillSpecification(
+    name="uppercase_text",
+    description="Convert supplied text to uppercase.",
+    intended_use="Provide a deterministic text transformation.",
+    entry_point="backtalk.features.uppercase_text:run",
+    input_schema={
+        "type": "object",
+        "properties": {"text": {"type": "string"}},
+        "required": ["text"],
+        "additionalProperties": False,
+    },
+    output_schema={"type": "string"},
+    expected_behavior=("Return the supplied text in uppercase.",),
+    proposed_tests=("Uppercase ASCII text.", "Handle empty text."),
+)
+
+candidate = forge.prepare_candidate(specification)
+packet = forge.review_candidate(candidate.candidate_id)
+print(packet.candidate_id, packet.static_validation["passed"])
+print(packet.runtime_status, packet.installation_status, packet.activation_status)
+```
+
+The main checkout must be clean before `prepare_candidate` creates the
+worktree. The source and generated tests are placed on the candidate branch;
+the local model response is never imported or executed. Review the returned
+`packet.source_files` and manifest before recording a human review.
+
+### Execution isolation: intentionally not available yet
+
+The default execution backend is `UnavailableExecutionBackend`. Calling
+`evaluate_candidate` returns `awaiting_isolated_execution` and does not start
+a subprocess or execute candidate code. A restricted backend interface exists
+for a future Windows Sandbox/AppContainer implementation, but no concrete
+secure Windows execution backend is shipped in Phase 6.
+
+Do not substitute the Phase 3 `SandboxRunner` for this backend. That runner
+copies the project and starts a subprocess, but the subprocess still has the
+current Windows user's filesystem and network permissions. A Git worktree is
+also only source separation. Neither mechanism is a hardened OS security
+boundary. Static validation is a conservative policy screen, not a proof that
+generated code is safe.
+
+### Permissions and installation boundaries
+
+Phase 6 grants no generated-tool permissions. Requests for permissions,
+filesystem access, network access or third-party dependencies cause static
+validation to fail and remain visible in the review packet. Generated tools
+must register as non-mutating functions with literal metadata matching their
+specification. The generated test file is supplied for human review but is
+not run by the local copy-based sandbox.
+
+Human code review, runtime execution approval, installation and activation
+are separate stages. The current implementation supports review records and
+records a conditional installation approval, but it does not implement an
+installer, approve a feature sidecar, load a module, activate code, or wire
+Skill Forge into the chat/bridge/dashboard. In particular, an archive
+`promote` decision is not runtime approval.
+
+### Git and recovery
+
+- Candidate worktrees and branches are retained for inspection.
+- `GitWorktreeManager.abandon(...)` refuses to remove a worktree with tracked
+  changes, staged changes or untracked files. When it does remove a clean
+  worktree, it deliberately retains the candidate branch for audit/recovery.
+- Do not use `git clean`, `git reset --hard`, or recursive deletion to
+  recover failed candidate creation. Inspect partially-created worktrees and
+  resolve them deliberately.
+- The candidate-relative worktree reference is stored in the archive rather
+  than an absolute machine path. The worktree root is resolved by the local
+  Skill Forge instance.
+
+### Verification
+
+Run the unit tests from the Backtalk project directory in Windows PowerShell:
+
+```powershell
+cd C:\Users\ARIN\Lumen\backtalk
+uv run python -m unittest discover -s tests -v
+```
+
+The 30 Phase 6 test methods cover specification validation, AST-only static checks,
+prohibited operations and permissions, loopback-only Ollama configuration,
+worktree creation and refusal behavior, archive metadata, source-drift
+rejection, fail-closed execution, review, and installation-approval gates.
+
+### Current limits
+
+- There is no concrete restricted Windows execution backend, real runtime
+  evaluation receipt, installer or activation workflow yet.
+- The review packet is a Python API result; this phase does not add a dashboard
+  or bridge review screen.
+- No generated candidate is added to the live feature directory or loaded into
+  the running registry.
+- Static AST rules can miss behaviors they do not recognize. They must never
+  be treated as the OS isolation boundary or as a substitute for human review.
+- The archive is append-only through its API, not tamper-proof against direct
+  local filesystem modification.
+- The model may return malformed, incomplete or poor-quality code. Such output
+  can be rejected during validation or human review; generation is not a
+  guarantee of correctness.

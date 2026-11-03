@@ -278,14 +278,24 @@ class ToolRegistry:
                 continue
 
             old_signature = self._signatures.get(path.name)
-            if old_signature == signature:
+            approved = self._is_approved(path, signature[2])
+            if old_signature == signature and approved:
                 current[path.name] = signature
                 results[path.name] = "unchanged"
                 continue
 
-            if not self._is_approved(path, signature[2]):
-                results[path.name] = "skipped: missing or stale approval hash"
-                if old_signature is not None:
+            if not approved:
+                if old_signature == signature:
+                    old_source = str(path.resolve())
+                    self.unregister_source(old_source)
+                    for module_name, module in list(self._modules.items()):
+                        if Path(str(getattr(module, "__file__", ""))).resolve() == path:
+                            self._modules.pop(module_name, None)
+                            sys.modules.pop(module_name, None)
+                    results[path.name] = "revoked: approval marker missing or stale"
+                else:
+                    results[path.name] = "skipped: missing or stale approval hash"
+                if old_signature is not None and old_signature != signature:
                     current[path.name] = old_signature
                 continue
 

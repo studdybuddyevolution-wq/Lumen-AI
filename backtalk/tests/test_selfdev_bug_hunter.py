@@ -86,15 +86,17 @@ class BugHunterTests(unittest.TestCase):
     def test_redacts_bearer_tokens_private_keys_and_home_paths(self) -> None:
         redacted = redact_text(
             "Authorization: Bearer abcdef123 password='with spaces' "
-            "C:\\Users\\Arin\\Lumen\\app.py "
+            "C:\\Users\\Arin\\Lumen\\app.py /home/arin/Lumen/app.py "
             "-----BEGIN PRIVATE KEY-----secret-material-----END PRIVATE KEY-----"
         )
 
         self.assertNotIn("abcdef123", redacted)
         self.assertNotIn("with spaces", redacted)
         self.assertNotIn("C:\\Users\\Arin", redacted)
+        self.assertNotIn("/home/arin", redacted)
         self.assertNotIn("secret-material", redacted)
         self.assertIn("%USERPROFILE%", redacted)
+        self.assertIn("%HOME%", redacted)
 
     def test_in_project_symlink_is_not_followed_for_source_context(self) -> None:
         alias = self.root / "alias.py"

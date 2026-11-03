@@ -5,8 +5,6 @@
     const API = '';
     let currentPage = 'home';
     let statusInterval = null;
-    let approvalInterval = null;
-    let pendingApprovalData = null;
 
     // Navigation
     document.querySelectorAll('.nav-item').forEach(btn => {
@@ -25,7 +23,6 @@
 
         if (page === 'home') refreshStatus();
         if (page === 'chat') syncChatHistory();
-        if (page === 'approvals') checkApprovals();
     }
 
     // ==========================================
@@ -56,7 +53,9 @@
             { label: 'Speech Synthesis', value: 'Kokoro (' + (data.kokoro || 'ready') + ')', dot: isVoiceOnline ? 'online' : 'unknown' },
             { label: 'Memory Vault', value: data.memory !== 'not configured' ? 'connected' : 'not configured', dot: data.memory !== 'not configured' ? 'online' : 'offline' },
             { label: 'Barehands Gestures', value: data.barehands || 'stopped', dot: data.barehands === 'running' ? 'online' : 'offline' },
-            { label: 'Permission Gate', value: (data.permissions || 'ask').toUpperCase() + ' (strict)', dot: 'online' },
+            { label: 'Execution Mode', value: (data.execution_mode || 'autonomous').toUpperCase(), dot: 'online' },
+            { label: 'Registered Tools', value: String(data.registered_tools || 0), dot: 'online' },
+            { label: 'Feature Modules', value: String(data.feature_modules || 0), dot: 'online' },
             { label: 'Session Turns', value: String(data.turns || 0), dot: 'online' },
         ];
 
@@ -69,91 +68,6 @@
                 </div>
             </div>
         `).join('');
-    }
-
-    // ==========================================
-    // Approvals (Shared with Voice Gate)
-    // ==========================================
-    async function checkApprovals() {
-        try {
-            const resp = await fetch(`${API}/api/approval`);
-            const data = await resp.json();
-            pendingApprovalData = data.pending;
-            renderApprovals(pendingApprovalData);
-            updateApprovalNavIndicator(Boolean(pendingApprovalData));
-        } catch (e) {
-            console.error('Approvals fetch failed:', e);
-        }
-    }
-
-    function updateApprovalNavIndicator(hasPending) {
-        const navItem = document.querySelector('[data-page="approvals"]');
-        if (!navItem) return;
-        let badge = navItem.querySelector('.approval-badge');
-        if (hasPending) {
-            if (!badge) {
-                badge = document.createElement('span');
-                badge.className = 'approval-badge';
-                badge.style.cssText = 'background:var(--warning);color:black;font-size:10px;font-weight:700;padding:2px 6px;border-radius:10px;margin-left:auto;';
-                badge.textContent = '!';
-                navItem.appendChild(badge);
-            }
-        } else if (badge) {
-            badge.remove();
-        }
-    }
-
-    function renderApprovals(pending) {
-        const container = document.getElementById('approvals-container');
-        if (!container) return;
-
-        if (!pending) {
-            container.innerHTML = `
-                <div class="empty-state">
-                    <div class="icon">🔒</div>
-                    <p>No pending approvals. Actions requiring permission will appear here in real time.</p>
-                </div>
-            `;
-            return;
-        }
-
-        container.innerHTML = `
-            <div class="approval-card">
-                <h3>⚠️ Action Permission Requested</h3>
-                <p style="font-size:14px;color:var(--text-primary);margin-bottom:8px;">
-                    <strong>Intent:</strong> ${escapeHtml(pending.what || 'Execute tool')}
-                </p>
-                <p style="font-size:13px;color:var(--text-muted);margin-bottom:8px;">
-                    <strong>Tool:</strong> ${escapeHtml(pending.tool || 'Unknown')}
-                </p>
-                <div class="detail">${escapeHtml(pending.detail || JSON.stringify(pending.tool_input || {}))}</div>
-                <p style="font-size:12px;color:var(--text-muted);margin-bottom:12px;">
-                    You can approve/deny by clicking below or by speaking "Yes" / "No" into your microphone.
-                </p>
-                <div class="approval-actions">
-                    <button class="btn btn-success" id="btn-approve">✓ Approve Action</button>
-                    <button class="btn btn-danger" id="btn-deny">✕ Deny Action</button>
-                </div>
-            </div>
-        `;
-
-        document.getElementById('btn-approve')?.addEventListener('click', () => respondApproval(true));
-        document.getElementById('btn-deny')?.addEventListener('click', () => respondApproval(false));
-    }
-
-    async function respondApproval(approved) {
-        try {
-            await fetch(`${API}/api/approval/respond`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ approved }),
-            });
-            pendingApprovalData = null;
-            renderApprovals(null);
-            updateApprovalNavIndicator(false);
-        } catch (e) {
-            console.error('Failed to submit approval:', e);
-        }
     }
 
     // ==========================================
@@ -243,7 +157,6 @@
             document.getElementById(typingId)?.remove();
             appendMessage('assistant', `Connection error: ${e.message}`, true);
         }
-        checkApprovals();
     }
 
     function appendMessage(role, content, scroll) {
@@ -402,12 +315,7 @@
         if (currentPage === 'home') refreshStatus();
     }, 4000);
 
-    approvalInterval = setInterval(() => {
-        checkApprovals();
-    }, 2000);
-
     // Initial triggers
     refreshStatus();
-    checkApprovals();
     syncChatHistory();
 })();

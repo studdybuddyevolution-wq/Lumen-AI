@@ -1,39 +1,41 @@
-"""Validated tool registration and hot-reload support for Lumen.
+"""Validated tool registry and explicit-trust hot reload for Lumen.
 
-Feature modules are trusted local extensions. The registry validates their
-metadata and tool arguments; it is not a sandbox for untrusted Python code.
+Feature modules are trusted local Python extensions, not sandboxed code.
+Built-in modules are part of the application. Additional modules load only
+when their adjacent .approved file contains the module's current SHA-256.
 """
 from __future__ import annotations
 
 import contextvars
 import copy
-import importlib
+import hashlib
 import importlib.machinery
+import importlib.util
 import logging
 import re
 import sys
 import threading
-import time
 import types
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
 
-from jsonschema import Draft202012Validator, SchemaError, ValidationError
+from jsonschema import Draft202012Validator, SchemaError, SchemaError as _UnusedSchemaError
 
 LOGGER = logging.getLogger("lumen.registry")
 _TOOL_NAME = re.compile(r"^[a-zA-Z][a-zA-Z0-9_]{0,63}$")
 _ACTIVE_REGISTRY: contextvars.ContextVar["ToolRegistry | None"] = (
     contextvars.ContextVar("lumen_active_tool_registry", default=None)
 )
+_BUILTIN_FEATURES = {"core_tools.py"}
 
 
 class ToolRegistrationError(ValueError):
-    """Raised when a tool cannot safely be added to the registry."""
+    """Raised when a tool cannot be added to the registry."""
 
 
 class ToolValidationError(ValueError):
-    """Raised when a model-supplied argument object does not match a schema."""
+    """Raised when model-supplied arguments do not match the tool schema."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -46,7 +48,6 @@ class ToolDefinition:
     source: str
 
     def to_ollama_declaration(self) -> dict[str, Any]:
-        """Return the function-tool shape expected by Ollama's /api/chat."""
         return {
             "type": "function",
             "function": {
@@ -57,6 +58,19 @@ class ToolDefinition:
         }
 
 
+def approve_feature_module(path: str | Path) -> str:
+    """Write a SHA-256 approval sidecar after a human has reviewed the code.
+
+    The caller must obtain explicit user approval before invoking this helper.
+    """
+    feature_path = Path(path).resolve()
+    if feature_path.suffix != ".py" or not feature_path.is_file():
+        raise ValueError("Feature approval requires an existing .py file.")
+    digest = hashlib.sha256(feature_path.read_bytes()).hexdigest()
+    feature_path.with_suffix(".approved").write_text(digest + "\n", encoding="ascii")
+    return digest
+
+
 class ToolRegistry:
     """Thread-safe registry for built-in and dynamically loaded local tools."""
 
@@ -64,23 +78,23 @@ class ToolRegistry:
         self._tools: dict[str, ToolDefinition] = {}
         self._source_tools: dict[str, set[str]] = {}
         self._modules: dict[str, types.ModuleType] = {}
-        self._module_sources: dict[str, str] = {}
         self._feature_dir: Path | None = None
-        self._signatures: dict[str, tuple[int, int]] = {}
+        self._signatures: dict[str, tuple[int, int, str]] = {}
+        self._generation = 0
         self._lock = threading.RLock()
         self._watch_stop = threading.Event()
         self._watch_thread: threading.Thread | None = None
 
     @staticmethod
     def _check_schema(schema: dict[str, Any]) -> None:
-        if not isinstance(schema, dict):
-            raise ToolRegistrationError("params_schema must be a JSON Schema object.")
-        if schema.get("type") != "object":
-            raise ToolRegistrationError("Tool params_schema must have type='object'.")
+        if not isinstance(schema, dict) or schema.get("type") != "object":
+            raise ToolRegistrationError(
+                "params_schema must be a JSON Schema object with type='object'."
+            )
         try:
             Draft202012Validator.check_schema(schema)
-        except SchemaError as exc:
-            raise ToolRegistrationError(f"Invalid JSON Schema: {exc.message}") from exc
+        except Exception as exc:
+            raise ToolRegistrationError(f"Invalid JSON Schema: {exc}") from exc
 
     def register(
         self,
@@ -92,18 +106,14 @@ class ToolRegistry:
         handler: Callable[..., Any],
         source: str = "builtin",
     ) -> ToolDefinition:
-        """Register one tool. Duplicate names fail rather than shadow tools."""
         if not isinstance(name, str) or not _TOOL_NAME.fullmatch(name):
-            raise ToolRegistrationError(
-                "Tool names must start with a letter and contain only letters, "
-                "numbers, or underscores (maximum 64 characters)."
-            )
+            raise ToolRegistrationError("Tool name is invalid or too long.")
         if not isinstance(description, str) or not description.strip():
-            raise ToolRegistrationError(f"Tool {name!r} needs a non-empty description.")
+            raise ToolRegistrationError(f"Tool {name!r} needs a description.")
         if not callable(handler):
             raise ToolRegistrationError(f"Tool {name!r} handler must be callable.")
         if not isinstance(mutating, bool):
-            raise ToolRegistrationError(f"Tool {name!r} mutating must be a boolean.")
+            raise ToolRegistrationError(f"Tool {name!r} mutating must be boolean.")
         self._check_schema(params_schema)
 
         definition = ToolDefinition(
@@ -118,14 +128,13 @@ class ToolRegistry:
             existing = self._tools.get(name)
             if existing is not None:
                 raise ToolRegistrationError(
-                    f"Tool name {name!r} is already registered by {existing.source!r}."
+                    f"Tool {name!r} already belongs to {existing.source!r}."
                 )
             self._tools[name] = definition
             self._source_tools.setdefault(source, set()).add(name)
         return definition
 
     def unregister_source(self, source: str) -> None:
-        """Remove all tools contributed by one feature source."""
         with self._lock:
             for name in self._source_tools.pop(source, set()):
                 current = self._tools.get(name)
@@ -141,14 +150,12 @@ class ToolRegistry:
             return sorted(self._tools.values(), key=lambda item: item.name)
 
     def declarations(self, names: list[str] | None = None) -> list[dict[str, Any]]:
-        """Build Ollama declarations, optionally restricted to named tools."""
         with self._lock:
-            if names is None:
-                selected = list(self._tools.values())
-            else:
-                selected = [
-                    self._tools[name] for name in names if name in self._tools
-                ]
+            selected = (
+                list(self._tools.values())
+                if names is None
+                else [self._tools[name] for name in names if name in self._tools]
+            )
         return [item.to_ollama_declaration() for item in selected]
 
     def validate_arguments(self, name: str, arguments: Any) -> dict[str, Any]:
@@ -169,22 +176,32 @@ class ToolRegistry:
         return arguments
 
     def execute(self, name: str, arguments: dict[str, Any]) -> Any:
-        """Validate then invoke a registered synchronous tool handler."""
         definition = self.get(name)
         if definition is None:
             raise ToolValidationError(f"Unknown tool: {name!r}.")
         clean_arguments = self.validate_arguments(name, arguments)
         result = definition.handler(**clean_arguments)
         if hasattr(result, "__await__"):
-            raise TypeError(
-                f"Tool {name!r} returned an awaitable; registry handlers must be synchronous."
-            )
+            raise TypeError("Tool handlers must be synchronous functions.")
         return result
 
     @staticmethod
-    def _signature(path: Path) -> tuple[int, int]:
+    def _signature(path: Path) -> tuple[int, int, str]:
         stat = path.stat()
-        return stat.st_mtime_ns, stat.st_size
+        digest = hashlib.sha256(path.read_bytes()).hexdigest()
+        return stat.st_mtime_ns, stat.st_size, digest
+
+    @staticmethod
+    def _is_approved(path: Path, digest: str) -> bool:
+        if path.name in _BUILTIN_FEATURES:
+            return True
+        try:
+            stored = path.with_suffix(".approved").read_text(
+                encoding="ascii"
+            ).strip().lower()
+        except OSError:
+            return False
+        return stored == digest
 
     def _ensure_feature_package(self, feature_dir: Path) -> str:
         package_name = "_lumen_feature_plugins_" + str(
@@ -200,47 +217,55 @@ class ToolRegistry:
             sys.modules[package_name] = package
         return package_name
 
-    def _load_feature(self, path: Path, package_name: str) -> None:
+    def _load_feature(self, path: Path, package_name: str) -> bool:
         source = str(path.resolve())
-        module_name = f"{package_name}.{path.stem}"
         previous = {
             name: definition
             for name, definition in self._tools.items()
             if definition.source == source
         }
         self.unregister_source(source)
+        self._generation += 1
+        module_name = f"{package_name}.{path.stem}_{self._generation}"
         token = _ACTIVE_REGISTRY.set(self)
+        module: types.ModuleType | None = None
         try:
-            importlib.invalidate_caches()
-            if module_name in self._modules:
-                module = importlib.reload(self._modules[module_name])
-            else:
-                module = importlib.import_module(module_name)
+            spec = importlib.util.spec_from_file_location(module_name, path)
+            if spec is None or spec.loader is None:
+                raise ImportError(f"Could not create import spec for {path.name}")
+            module = importlib.util.module_from_spec(spec)
+            module.__package__ = package_name
+            sys.modules[module_name] = module
+            spec.loader.exec_module(module)
+            for old_name, old_module in list(self._modules.items()):
+                if Path(str(getattr(old_module, "__file__", ""))).resolve() == path:
+                    self._modules.pop(old_name, None)
+                    sys.modules.pop(old_name, None)
             self._modules[module_name] = module
-            self._module_sources[module_name] = source
             LOGGER.info("Loaded feature module %s", path.name)
+            return True
         except Exception:
-            # Preserve the last known-good feature version if reload fails.
+            if module is not None:
+                sys.modules.pop(module_name, None)
             with self._lock:
                 for name, definition in previous.items():
                     self._tools[name] = definition
                     self._source_tools.setdefault(source, set()).add(name)
-            LOGGER.exception("Feature module %s failed to load; previous tools retained", path.name)
+            LOGGER.exception(
+                "Feature module %s failed to load; previous tools retained", path.name
+            )
+            return False
         finally:
             _ACTIVE_REGISTRY.reset(token)
 
     def load_features(self, feature_dir: str | Path) -> dict[str, str]:
-        """Load new or changed .py feature modules without stopping the process.
-
-        The returned mapping contains per-file status messages. A broken file
-        does not prevent other feature modules from loading.
-        """
+        """Load changed approved modules; preserve working versions on bad edits."""
         folder = Path(feature_dir).resolve()
         folder.mkdir(parents=True, exist_ok=True)
         (folder / "__init__.py").touch(exist_ok=True)
         package_name = self._ensure_feature_package(folder)
         results: dict[str, str] = {}
-        current: dict[str, tuple[int, int]] = {}
+        current: dict[str, tuple[int, int, str]] = {}
 
         for path in sorted(folder.glob("*.py")):
             if path.name == "__init__.py" or not path.stem.isidentifier():
@@ -250,22 +275,35 @@ class ToolRegistry:
             except OSError as exc:
                 results[path.name] = f"unavailable: {exc}"
                 continue
-            current[path.name] = signature
+
             old_signature = self._signatures.get(path.name)
-            if old_signature == signature and path.name in self._signatures:
+            if old_signature == signature:
+                current[path.name] = signature
                 results[path.name] = "unchanged"
                 continue
-            self._load_feature(path, package_name)
-            results[path.name] = "loaded or reloaded"
 
-        # Unregister deleted feature files and drop their import modules.
-        for old_name in set(self._signatures) - set(current):
-            old_path = folder / old_name
-            self.unregister_source(str(old_path.resolve()))
-            module_name = f"{package_name}.{Path(old_name).stem}"
-            self._modules.pop(module_name, None)
-            self._module_sources.pop(module_name, None)
-            sys.modules.pop(module_name, None)
+            if not self._is_approved(path, signature[2]):
+                results[path.name] = "skipped: missing or stale approval hash"
+                if old_signature is not None:
+                    current[path.name] = old_signature
+                continue
+
+            if self._load_feature(path, package_name):
+                current[path.name] = signature
+                results[path.name] = "loaded"
+            else:
+                if old_signature is not None:
+                    current[path.name] = old_signature
+                results[path.name] = "error: previous version retained"
+
+        present_names = {path.name for path in folder.glob("*.py")}
+        for old_name in set(self._signatures) - present_names:
+            old_source = str((folder / old_name).resolve())
+            self.unregister_source(old_source)
+            for module_name, module in list(self._modules.items()):
+                if Path(str(getattr(module, "__file__", ""))).resolve() == Path(old_source):
+                    self._modules.pop(module_name, None)
+                    sys.modules.pop(module_name, None)
             results[old_name] = "removed"
 
         self._feature_dir = folder
@@ -275,7 +313,6 @@ class ToolRegistry:
     def start_watcher(
         self, feature_dir: str | Path | None = None, *, interval_seconds: float = 1.0
     ) -> None:
-        """Start a small standard-library polling watcher. Safe to call repeatedly."""
         folder = Path(feature_dir).resolve() if feature_dir else self._feature_dir
         if folder is None:
             raise ValueError("Call load_features() before starting the feature watcher.")
@@ -318,11 +355,11 @@ def tool(
     """Decorator for registering a feature function as a Lumen tool."""
     def decorate(function: Callable[..., Any]) -> Callable[..., Any]:
         active = registry or _ACTIVE_REGISTRY.get() or DEFAULT_REGISTRY
-        source = function.__module__
         module = sys.modules.get(function.__module__)
         module_file = getattr(module, "__file__", None)
-        if module_file:
-            source = str(Path(module_file).resolve())
+        source = (
+            str(Path(module_file).resolve()) if module_file else function.__module__
+        )
         active.register(
             name=name,
             description=description,

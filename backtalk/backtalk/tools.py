@@ -143,7 +143,9 @@ def _run_powershell(args: dict[str, Any]) -> str:
     blocked = re.compile(
         r"(?i)(\bRemove-Item\b|\bFormat-Volume\b|\bClear-Disk\b|\bInitialize-Disk\b|"
         r"\bdiskpart\b|\bStop-Computer\b|\bRestart-Computer\b|\bSet-ExecutionPolicy\b|"
-        r"\breg\s+delete\b|\bbcdedit\b|\bClear-RecycleBin\b|\bshutdown\s+/(s|r)\b)"
+        r"\breg\s+delete\b|\bbcdedit\b|\bClear-RecycleBin\b|\bshutdown\s+/(s|r)\b|"
+        r"\bwinget\s+install\b|\bchoco\s+install\b|\bscoop\s+install\b|"
+        r"\bInstall-Module\b|\bAdd-AppxPackage\b|\bmsiexec\s+/(i|package)\b)"
     )
     if blocked.search(command):
         raise PermissionError("This command matches a blocked destructive or security-sensitive operation. Lumen will not run it through the general PowerShell tool.")

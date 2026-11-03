@@ -21,6 +21,7 @@ from backtalk.execution import ExecutionTracker
 from backtalk.features import core_tools as _core_tools  # registers trusted built-ins
 from backtalk.router import ToolRouter
 from backtalk.vlog import log
+from backtalk.selfdev.bug_hunter import BugHunter
 
 _SENTENCE_END = re.compile(r"(?<=[.!?])\s+")
 
@@ -49,6 +50,7 @@ class WarmBrain:
         # longer use an interactive approval callback.
         self._registry = DEFAULT_REGISTRY
         self.execution_tracker = ExecutionTracker(max_events=100)
+        self.bug_hunter = BugHunter(Path(__file__).resolve().parents[1], max_reports=100)
         self._router = ToolRouter(max_tools=8, min_tools=5)
         self._feature_dir = Path(__file__).resolve().parent / "features"
         self._features_loaded = False
@@ -62,6 +64,16 @@ class WarmBrain:
                              "http://127.0.0.1:11434").rstrip("/")
         self._num_ctx = int(CFG.get("ollama_num_ctx") or 8192)
         self._max_tool_rounds = int(CFG.get("ollama_max_tool_rounds") or 6)
+
+    def _capture_bug(self, exc: BaseException, component: str) -> None:
+        """Keep diagnostics best-effort so capture failures never affect Lumen."""
+        try:
+            self.bug_hunter.capture_exception(exc, component=component)
+        except Exception as diagnostic_error:
+            log(
+                "[bug-hunter] capture failed: "
+                f"{type(diagnostic_error).__name__}"
+            )
 
     def _load_prompt(self) -> str:
         name = str(CFG.get("name") or "Lumen")
@@ -279,6 +291,7 @@ class WarmBrain:
             self.execution_tracker.finish(execution_id, "denied", message)
             return message
         except Exception as exc:
+            self._capture_bug(exc, component=f"tool:{name}")
             message = f"Tool error: {type(exc).__name__}: {exc}"
             log(f"[tools] {name} failed: {exc!r}")
             self.execution_tracker.finish(execution_id, "failed", message)
@@ -291,7 +304,11 @@ class WarmBrain:
     async def ask_stream(self, utterance: str):
         """Run an Ollama conversation, validate and dispatch tools, then speak text."""
         if self._http is None or self._system_message is None:
-            await self.start()
+            try:
+                await self.start()
+            except Exception as exc:
+                self._capture_bug(exc, component="ollama_start")
+                raise
         self._messages.append({"role": "user", "content": utterance})
         self._dirty = True
         try:
@@ -323,6 +340,7 @@ class WarmBrain:
         except asyncio.CancelledError:
             raise
         except Exception as exc:
+            self._capture_bug(exc, component="ollama_chat")
             log(f"[brain] Ollama request failed: {exc!r}")
             yield "I couldn't complete that request because the local Ollama model returned an error. Check the Backtalk log for details."
         finally:

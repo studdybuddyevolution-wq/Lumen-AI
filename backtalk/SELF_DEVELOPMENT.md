@@ -233,3 +233,71 @@ mandatory for dynamic feature activation.
 - Run one local experiment at a time by default. Do not allow candidates to
   rewrite the archive controller, test suites, safety gates, approval logic or
   rollback rules.
+
+
+## Phase 5: Bug Hunter diagnostics
+
+The first Bug Hunter implementation is available in
+\`backtalk.selfdev.bug_hunter\`.
+
+### Runtime capture
+
+A \`BugHunter\` instance is attached to \`WarmBrain\`. It captures unexpected
+exceptions at these boundaries:
+
+- Tool handler failures after schema validation.
+- Ollama startup failures.
+- Ollama/chat-turn failures.
+- Unexpected localhost bridge chat and request-handler failures.
+
+Expected tool denials, invalid arguments, and user cancellation are not treated
+as bugs. Capture is best-effort: a diagnostic failure must never change the
+original action's result or take the voice loop down.
+
+### Traceback analysis
+
+The Bug Hunter parses formatted Python traceback frames, keeps only frames that
+resolve inside the Backtalk project root, and selects the innermost in-project
+frame as the primary location. It extracts a small source excerpt and uses the
+Python AST to identify the containing function or class when the file parses.
+Syntax-error files still retain a bounded line excerpt even though no AST
+symbol can be identified.
+
+Each report includes a stable fingerprint, exception type, sanitised message,
+component label, project-relative frame locations, AST symbol, small source
+context, first/last-seen timestamps and recurrence count. Repeated equivalent
+failures increment one report instead of creating unbounded duplicates.
+
+### Privacy and resource limits
+
+- Reports stay in memory and are capped at 100 unique fingerprints per runtime.
+- Raw tracebacks, local variables, tool arguments, conversation history and
+  full absolute paths are not collected as separate fields.
+- Exception messages or source lines can themselves embed user-provided text;
+  these are subject to pattern-based redaction, so reports must still be
+  treated as potentially sensitive. Do not deliberately place private inputs
+  or credentials in exception messages or source code.
+- Messages and source excerpts are bounded and common API keys, passwords,
+  bearer tokens, private-key blocks, token-like values and Windows user paths
+  are redacted before records are returned.
+- Only source files inside the configured project root are inspected; resolved
+  paths are checked for project containment and symlink traversal.
+- The localhost bridge exposes read-only summaries at
+  \`GET /bridge/bugs?limit=50\`. Reports are newest-first and the limit is capped
+  at 100. The HTTP response includes exception summaries, file/function/line
+  locations and AST symbols, but omits source excerpts and source-line text.
+
+### Current limits
+
+- Reports are process-local and disappear when Backtalk exits; persistent
+  cross-session diagnostics are not implemented in this phase.
+- This is reactive exception capture, not a background filesystem watcher,
+  static linter, crash-dump collector or Windows Event Log monitor.
+- Fingerprints group similar errors; they do not prove a root cause. The AST
+  symbol and source excerpt are diagnostic clues, not an automatic diagnosis.
+- The Bug Hunter never edits source code, generates patches, runs a repair
+  agent, or activates features. Those tasks remain subject to isolated
+  candidate worktrees, staged evaluation, explicit human review and approval.
+- Redaction uses conservative pattern matching and cannot guarantee detection
+  of every secret format. Do not deliberately place credentials in exception
+  messages or source files.

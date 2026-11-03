@@ -2,12 +2,14 @@ from __future__ import annotations
 
 import asyncio
 import unittest
+from pathlib import Path
 from types import SimpleNamespace
 
 from backtalk import bridge
 from backtalk.brain import WarmBrain
 from backtalk.execution import ExecutionTracker
 from backtalk.registry import ToolValidationError
+from backtalk.selfdev.bug_hunter import BugHunter
 
 
 class ExecutionTrackerTests(unittest.TestCase):
@@ -87,10 +89,16 @@ class _StubRegistry:
         return self.result
 
 
+class _BrokenBugHunter:
+    def capture_exception(self, exc, *, component="runtime"):
+        raise OSError("diagnostic storage is unavailable")
+
+
 class ToolExecutionIntegrationTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self) -> None:
         self.brain = WarmBrain.__new__(WarmBrain)
         self.brain.execution_tracker = ExecutionTracker()
+        self.brain.bug_hunter = BugHunter(Path(__file__).resolve().parents[1])
         self.brain._registry = _StubRegistry()
 
     async def test_success_records_completed_call(self) -> None:
@@ -122,6 +130,17 @@ class ToolExecutionIntegrationTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Tool rejected", result)
         self.assertEqual(event["status"], "denied")
 
+    async def test_bug_hunter_failure_does_not_change_tool_result(self) -> None:
+        self.brain._registry = _StubRegistry(error=RuntimeError("simulated failure"))
+        self.brain.bug_hunter = _BrokenBugHunter()
+
+        result = await self.brain._run_tool({
+            "function": {"name": "sample_tool", "arguments": {}}
+        })
+
+        self.assertIn("RuntimeError: simulated failure", result)
+        self.assertEqual(self.brain.execution_tracker.recent(1)[0]["status"], "failed")
+
     async def test_handler_exception_is_recorded_as_failed(self) -> None:
         self.brain._registry = _StubRegistry(error=RuntimeError("simulated failure"))
         result = await self.brain._run_tool({
@@ -130,6 +149,9 @@ class ToolExecutionIntegrationTests(unittest.IsolatedAsyncioTestCase):
         event = self.brain.execution_tracker.recent(1)[0]
         self.assertIn("simulated failure", result)
         self.assertEqual(event["status"], "failed")
+        bug_summary = self.brain.bug_hunter.summary()
+        self.assertEqual(bug_summary["events_seen"], 1)
+        self.assertEqual(bug_summary["reports"][0]["exception_type"], "RuntimeError")
 
 
 class ExecutionBridgeTests(unittest.TestCase):

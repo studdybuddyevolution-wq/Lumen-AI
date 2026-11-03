@@ -27,6 +27,18 @@ _chat_handler: Callable[[str], Coroutine[Any, Any, str]] | None = None
 _interrupt_handler: Callable[[], Coroutine[Any, Any, None]] | None = None
 
 
+def _capture_bug(exc: BaseException, component: str) -> None:
+    """Send an unexpected runtime failure to the brain's bounded Bug Hunter."""
+    hunter = getattr(_brain, "bug_hunter", None) if _brain is not None else None
+    if hunter is None:
+        return
+    try:
+        hunter.capture_exception(exc, component=component)
+    except Exception:
+        # Diagnostics must never make a user-facing request fail.
+        pass
+
+
 def setup_bridge(
     brain: Any,
     mouth: Any,
@@ -96,6 +108,13 @@ async def _handle_client(reader: asyncio.StreamReader, writer: asyncio.StreamWri
             except (TypeError, ValueError):
                 limit = 50
             resp_data = _get_executions(limit)
+        elif method == "GET" and route == "/bridge/bugs":
+            params = parse_qs(parsed_url.query)
+            try:
+                limit = int(params.get("limit", ["50"])[0])
+            except (TypeError, ValueError):
+                limit = 50
+            resp_data = _get_bugs(limit)
         elif method == "GET" and route == "/bridge/approval":
             resp_data = _get_approval()
         elif method == "POST" and route == "/bridge/approval":
@@ -115,6 +134,7 @@ async def _handle_client(reader: asyncio.StreamReader, writer: asyncio.StreamWri
                         reply = await _chat_handler(message)
                         resp_data = {"response": reply}
                 except Exception as exc:
+                    _capture_bug(exc, "bridge_chat")
                     log(f"[bridge] error handling chat: {exc}")
                     resp_status = 500
                     resp_data = {"error": str(exc)}
@@ -140,6 +160,7 @@ async def _handle_client(reader: asyncio.StreamReader, writer: asyncio.StreamWri
     except (asyncio.CancelledError, ConnectionResetError, BrokenPipeError):
         pass
     except Exception as exc:
+        _capture_bug(exc, "bridge_request")
         log(f"[bridge] client handler error: {exc}")
         try:
             await _send_response(writer, 500, {"error": str(exc)})
@@ -250,6 +271,35 @@ def _get_executions(limit: int = 50) -> dict[str, Any]:
         if status in counts:
             counts[status] += 1
     return {"events": events, "count": len(events), "counts": counts}
+
+
+def _get_bugs(limit: int = 50) -> dict[str, Any]:
+    """Return bounded, sanitised runtime bug reports for the localhost dashboard."""
+    hunter = getattr(_brain, "bug_hunter", None) if _brain is not None else None
+    if hunter is None:
+        return {
+            "events_seen": 0,
+            "unique_reports": 0,
+            "recurrent_reports": 0,
+            "reports": [],
+        }
+    try:
+        payload = hunter.summary(max(0, min(int(limit), 100)))
+    except (TypeError, ValueError):
+        payload = hunter.summary(50)
+
+    # Keep source excerpts inside the runtime process. The localhost HTTP
+    # endpoint exposes locations and AST symbols, not snippets of local code.
+    for report in payload.get("reports", []):
+        report.pop("source_context", None)
+        report["frames"] = [
+            {
+                key: frame.get(key)
+                for key in ("file", "line", "function")
+            }
+            for frame in report.get("frames", [])
+        ]
+    return payload
 
 
 def _get_approval() -> dict[str, Any]:

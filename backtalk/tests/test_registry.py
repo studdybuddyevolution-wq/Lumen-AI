@@ -124,7 +124,12 @@ class ToolRegistryTests(unittest.TestCase):
             self.registry.load_features(feature_dir)
             self.assertIsNone(self.registry.get("reload_test"))
 
+            # Re-approve, load again, then verify deleting an active feature unregisters it.
+            self._approve(feature)
+            self.registry.load_features(feature_dir)
+            self.assertEqual(self.registry.execute("reload_test", {}), "second version")
             feature.unlink()
+            feature.with_suffix(".approved").unlink()
             self.registry.load_features(feature_dir)
             self.assertIsNone(self.registry.get("reload_test"))
 

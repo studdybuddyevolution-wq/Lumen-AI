@@ -27,7 +27,6 @@ _TOOL_NAME = re.compile(r"^[a-zA-Z][a-zA-Z0-9_]{0,63}$")
 _ACTIVE_REGISTRY: contextvars.ContextVar["ToolRegistry | None"] = (
     contextvars.ContextVar("lumen_active_tool_registry", default=None)
 )
-_BUILTIN_FEATURES = {"core_tools.py"}
 
 
 class ToolRegistrationError(ValueError):
@@ -205,8 +204,6 @@ class ToolRegistry:
 
     @staticmethod
     def _is_approved(path: Path, digest: str) -> bool:
-        if path.name in _BUILTIN_FEATURES:
-            return True
         try:
             stored = path.with_suffix(".approved").read_text(
                 encoding="ascii"
@@ -281,7 +278,7 @@ class ToolRegistry:
         current: dict[str, tuple[int, int, str]] = {}
 
         for path in sorted(folder.glob("*.py")):
-            if path.name == "__init__.py" or not path.stem.isidentifier():
+            if path.name in {"__init__.py", "core_tools.py"} or not path.stem.isidentifier():
                 continue
             try:
                 signature = self._signature(path)

@@ -528,3 +528,263 @@ body {
 
 .empty-state .icon { font-size: 48px; margin-bottom: 16px; opacity: 0.5; }
 .empty-state p { font-size: 14px; }
+
+
+/* Tool Execution Activity */
+.execution-panel {
+    margin-top: 20px;
+}
+
+.execution-panel-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 14px;
+}
+
+.execution-panel-header h3 {
+    margin: 0;
+}
+
+.execution-summary {
+    color: var(--text-muted);
+    font-size: 12px;
+    text-align: right;
+}
+
+.execution-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.execution-card {
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    overflow: hidden;
+}
+
+.execution-card[open] {
+    border-color: var(--accent-dark);
+}
+
+.execution-card summary {
+    display: grid;
+    grid-template-columns: 10px minmax(120px, 1fr) auto auto auto 10px;
+    align-items: center;
+    gap: 12px;
+    min-height: 48px;
+    padding: 10px 14px;
+    cursor: pointer;
+    list-style: none;
+}
+
+.execution-card summary::-webkit-details-marker {
+    display: none;
+}
+
+.execution-card summary::after {
+    content: "⌄";
+    color: var(--text-muted);
+    font-size: 16px;
+    transition: transform var(--transition);
+}
+
+.execution-card[open] summary::after {
+    transform: rotate(180deg);
+}
+
+.execution-state-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--text-muted);
+}
+
+.execution-state-dot.running {
+    background: var(--info);
+    box-shadow: 0 0 8px var(--info);
+}
+
+.execution-state-dot.completed { background: var(--success); }
+.execution-state-dot.failed { background: var(--danger); }
+.execution-state-dot.denied { background: var(--warning); }
+
+.execution-name {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-family: var(--font-mono);
+    font-size: 13px;
+    color: var(--text-primary);
+}
+
+.execution-provider,
+.execution-status {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 999px;
+    padding: 3px 8px;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.5px;
+}
+
+.execution-provider.local {
+    background: rgba(144, 144, 168, 0.12);
+    color: var(--text-secondary);
+}
+
+.execution-provider.cloud {
+    background: rgba(59, 130, 246, 0.16);
+    color: #93c5fd;
+}
+
+.execution-provider.unknown {
+    background: var(--bg-card);
+    color: var(--text-muted);
+}
+
+.execution-status.running {
+    background: rgba(59, 130, 246, 0.14);
+    color: #93c5fd;
+}
+
+.execution-status.completed {
+    background: rgba(16, 185, 129, 0.14);
+    color: #6ee7b7;
+}
+
+.execution-status.failed {
+    background: rgba(239, 68, 68, 0.14);
+    color: #fca5a5;
+}
+
+.execution-status.denied {
+    background: rgba(245, 158, 11, 0.14);
+    color: #fcd34d;
+}
+
+.execution-meta {
+    color: var(--text-muted);
+    font-size: 11px;
+    white-space: nowrap;
+}
+
+.execution-card-body {
+    padding: 0 14px 14px 36px;
+}
+
+.execution-result {
+    color: var(--text-secondary);
+    font-family: var(--font-mono);
+    font-size: 12px;
+    line-height: 1.5;
+    margin: 0 0 10px;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+}
+
+.inspect-dialog {
+    margin: 0 0 0 auto;
+    width: min(640px, 100vw);
+    height: 100vh;
+    max-height: 100vh;
+    padding: 24px;
+    border: 1px solid var(--border);
+    border-radius: 0;
+    background: var(--bg-secondary);
+    color: var(--text-primary);
+    box-shadow: var(--shadow);
+    overflow-y: auto;
+}
+
+.inspect-dialog::backdrop {
+    background: rgba(0, 0, 0, 0.62);
+    backdrop-filter: blur(3px);
+}
+
+.inspect-dialog-header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 16px;
+    padding-bottom: 18px;
+    border-bottom: 1px solid var(--border);
+    margin-bottom: 20px;
+}
+
+.inspect-dialog-header h3 {
+    font-size: 18px;
+    margin-bottom: 6px;
+}
+
+.inspect-dialog-header p {
+    color: var(--text-muted);
+    font-size: 12px;
+    line-height: 1.5;
+    overflow-wrap: anywhere;
+}
+
+.inspect-section {
+    margin-bottom: 20px;
+}
+
+.inspect-section h4 {
+    color: var(--text-secondary);
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.7px;
+    margin-bottom: 8px;
+}
+
+.inspect-section pre {
+    background: var(--bg-input);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    color: var(--text-primary);
+    font-family: var(--font-mono);
+    font-size: 12px;
+    line-height: 1.55;
+    padding: 14px;
+    max-height: 34vh;
+    overflow: auto;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+}
+
+@media (max-width: 760px) {
+    .execution-card summary {
+        grid-template-columns: 10px minmax(80px, 1fr) auto auto;
+        gap: 8px;
+    }
+
+    .execution-card summary .execution-meta {
+        grid-column: 2 / -1;
+        grid-row: 2;
+        white-space: normal;
+    }
+
+    .execution-card summary::after {
+        grid-column: 1;
+        grid-row: 2;
+        justify-self: start;
+    }
+
+    .execution-panel-header {
+        align-items: flex-start;
+        flex-direction: column;
+    }
+
+    .execution-summary {
+        text-align: left;
+    }
+
+    .inspect-dialog {
+        width: 100vw;
+        padding: 18px;
+    }
+}

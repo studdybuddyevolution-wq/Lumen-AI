@@ -89,6 +89,13 @@ async def _handle_client(reader: asyncio.StreamReader, writer: asyncio.StreamWri
             resp_data = _get_status()
         elif method == "GET" and route == "/bridge/history":
             resp_data = _get_history()
+        elif method == "GET" and route == "/bridge/executions":
+            params = parse_qs(parsed_url.query)
+            try:
+                limit = int(params.get("limit", ["50"])[0])
+            except (TypeError, ValueError):
+                limit = 50
+            resp_data = _get_executions(limit)
         elif method == "GET" and route == "/bridge/approval":
             resp_data = _get_approval()
         elif method == "POST" and route == "/bridge/approval":
@@ -220,6 +227,29 @@ def _get_history() -> dict[str, Any]:
                 "content": content,
             })
     return {"messages": formatted}
+
+
+def _get_executions(limit: int = 50) -> dict[str, Any]:
+    """Return recent bounded tool-execution events for the dashboard."""
+    tracker = (
+        getattr(_brain, "execution_tracker", None)
+        if _brain is not None
+        else None
+    )
+    if tracker is None:
+        return {
+            "events": [],
+            "count": 0,
+            "counts": {"running": 0, "completed": 0, "failed": 0, "denied": 0},
+        }
+
+    events = tracker.recent(max(1, min(int(limit), 100)))
+    counts = {status: 0 for status in ("running", "completed", "failed", "denied")}
+    for event in events:
+        status = event.get("status")
+        if status in counts:
+            counts[status] += 1
+    return {"events": events, "count": len(events), "counts": counts}
 
 
 def _get_approval() -> dict[str, Any]:

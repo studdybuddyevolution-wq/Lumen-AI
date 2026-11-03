@@ -250,16 +250,24 @@ class WarmBrain:
 
         try:
             args = self._parse_arguments(raw_arguments)
+            self._registry.validate_arguments(name, args)
+        except (TypeError, ValueError, json.JSONDecodeError, ToolValidationError) as exc:
+            message = (
+                f"Tool rejected: invalid arguments or schema mismatch ({exc})."
+            )
+            self.execution_tracker.finish(execution_id, "denied", message)
+            return message
+
+        try:
             result = await asyncio.to_thread(self._registry.execute, name, args)
         except asyncio.CancelledError:
             self.execution_tracker.finish(
                 execution_id, "failed", "Tool execution was cancelled."
             )
             raise
-        except (TypeError, ValueError, json.JSONDecodeError, ToolValidationError) as exc:
-            message = (
-                f"Tool rejected: invalid arguments or schema mismatch ({exc})."
-            )
+        except ToolValidationError as exc:
+            # A schema may have changed between validation and dispatch.
+            message = f"Tool rejected: invalid arguments or schema mismatch ({exc})."
             self.execution_tracker.finish(execution_id, "denied", message)
             return message
         except Exception as exc:

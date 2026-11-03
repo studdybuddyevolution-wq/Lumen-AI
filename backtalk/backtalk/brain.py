@@ -17,6 +17,7 @@ from pathlib import Path
 
 from backtalk.config import CFG, DISCIPLINE
 from backtalk.registry import DEFAULT_REGISTRY, ToolValidationError
+from backtalk.execution import ExecutionTracker
 from backtalk.features import core_tools as _core_tools  # registers trusted built-ins
 from backtalk.router import ToolRouter
 from backtalk.vlog import log
@@ -47,6 +48,7 @@ class WarmBrain:
         # Keep can_use_tool accepted for older launchers; routine actions no
         # longer use an interactive approval callback.
         self._registry = DEFAULT_REGISTRY
+        self.execution_tracker = ExecutionTracker(max_events=100)
         self._router = ToolRouter(max_tools=8, min_tools=5)
         self._feature_dir = Path(__file__).resolve().parent / "features"
         self._features_loaded = False
@@ -231,19 +233,44 @@ class WarmBrain:
         raise ValueError("Tool arguments must be a JSON object.")
 
     async def _run_tool(self, call: dict[str, Any]) -> str:
+        """Validate, execute, and record one tool call for the dashboard."""
         fn = call.get("function") or {}
-        name = str(fn.get("name") or "")
+        name = str(fn.get("name") or "unknown")
+        raw_arguments = fn.get("arguments", {})
+        # Current tool handlers run locally. The provider field is retained so
+        # the dashboard can distinguish a future explicitly cloud-backed call.
+        execution_id = self.execution_tracker.start(
+            name, raw_arguments, provider="local"
+        )
+
         if self._registry.get(name) is None:
-            return f"Tool rejected: {name!r} is not available to Lumen."
+            message = f"Tool rejected: {name!r} is not available to Lumen."
+            self.execution_tracker.finish(execution_id, "denied", message)
+            return message
+
         try:
-            args = self._parse_arguments(fn.get("arguments", {}))
+            args = self._parse_arguments(raw_arguments)
             result = await asyncio.to_thread(self._registry.execute, name, args)
+        except asyncio.CancelledError:
+            self.execution_tracker.finish(
+                execution_id, "failed", "Tool execution was cancelled."
+            )
+            raise
         except (TypeError, ValueError, json.JSONDecodeError, ToolValidationError) as exc:
-            return f"Tool rejected: invalid arguments or schema mismatch ({exc})."
+            message = (
+                f"Tool rejected: invalid arguments or schema mismatch ({exc})."
+            )
+            self.execution_tracker.finish(execution_id, "denied", message)
+            return message
         except Exception as exc:
+            message = f"Tool error: {type(exc).__name__}: {exc}"
             log(f"[tools] {name} failed: {exc!r}")
-            return f"Tool error: {type(exc).__name__}: {exc}"
-        return str(result)[:12000]
+            self.execution_tracker.finish(execution_id, "failed", message)
+            return message
+
+        output = str(result)[:12000]
+        self.execution_tracker.finish(execution_id, "completed", output)
+        return output
 
     async def ask_stream(self, utterance: str):
         """Run an Ollama conversation, validate and dispatch tools, then speak text."""

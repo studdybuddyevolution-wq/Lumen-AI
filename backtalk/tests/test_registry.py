@@ -119,6 +119,11 @@ class ToolRegistryTests(unittest.TestCase):
                 "second version",
             )
 
+            # Removing the approval marker revokes the loaded module.
+            feature.with_suffix(".approved").unlink()
+            self.registry.load_features(feature_dir)
+            self.assertIsNone(self.registry.get("reload_test"))
+
             feature.unlink()
             self.registry.load_features(feature_dir)
             self.assertIsNone(self.registry.get("reload_test"))

@@ -237,10 +237,21 @@ class WarmBrain:
         fn = call.get("function") or {}
         name = str(fn.get("name") or "unknown")
         raw_arguments = fn.get("arguments", {})
+
+        try:
+            args = self._parse_arguments(raw_arguments)
+        except (TypeError, ValueError, json.JSONDecodeError) as exc:
+            execution_id = self.execution_tracker.start(
+                name, raw_arguments, provider="local"
+            )
+            message = f"Tool rejected: invalid arguments or schema mismatch ({exc})."
+            self.execution_tracker.finish(execution_id, "denied", message)
+            return message
+
         # Current tool handlers run locally. The provider field is retained so
         # the dashboard can distinguish a future explicitly cloud-backed call.
         execution_id = self.execution_tracker.start(
-            name, raw_arguments, provider="local"
+            name, args, provider="local"
         )
 
         if self._registry.get(name) is None:
@@ -249,12 +260,9 @@ class WarmBrain:
             return message
 
         try:
-            args = self._parse_arguments(raw_arguments)
             self._registry.validate_arguments(name, args)
-        except (TypeError, ValueError, json.JSONDecodeError, ToolValidationError) as exc:
-            message = (
-                f"Tool rejected: invalid arguments or schema mismatch ({exc})."
-            )
+        except (TypeError, ValueError, ToolValidationError) as exc:
+            message = f"Tool rejected: invalid arguments or schema mismatch ({exc})."
             self.execution_tracker.finish(execution_id, "denied", message)
             return message
 
